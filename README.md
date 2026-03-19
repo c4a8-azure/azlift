@@ -354,7 +354,7 @@ The bootstrap stage uses OIDC federated credentials on Managed Identities — th
 - GitHub CLI (`gh`) logged in (for GitHub platform)
 - `aztfexport` installed
 - PowerShell 7 (for az-bootstrap)
-- Python 3.11+
+- Go 1.22+
 
 ---
 
