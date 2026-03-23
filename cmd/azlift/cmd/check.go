@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/c4a8-azure/azlift/internal/tools"
 	"github.com/spf13/cobra"
+
+	"github.com/c4a8-azure/azlift/internal/tools"
 )
 
 func newCheckCmd() *cobra.Command {

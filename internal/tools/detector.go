@@ -202,12 +202,17 @@ func checkMinVersion(name, version string, min [3]int, installURL string) error 
 			break
 		}
 		// Strip any trailing non-numeric suffix (e.g. "1-beta").
-		p = strings.FieldsFunc(p, func(r rune) bool { return r < '0' || r > '9' })[0]
-		n, err := strconv.Atoi(p)
-		if err != nil {
-			return nil // can't parse — skip version check
+		fields := strings.FieldsFunc(p, func(r rune) bool { return r < '0' || r > '9' })
+		if len(fields) == 0 {
+			continue // unparseable component — leave as zero
 		}
-		nums[i] = n
+		n, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue // unparseable — leave as zero, skip version check
+		}
+		if i < len(nums) {
+			nums[i] = n //nolint:gosec // G602 false positive: SplitN(...,3) and [3]int are both len 3; bounds checked above
+		}
 	}
 
 	for i := range 3 {

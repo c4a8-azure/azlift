@@ -29,7 +29,7 @@ func TestLoadNoFile(t *testing.T) {
 	tmp := t.TempDir()
 	orig, _ := os.Getwd()
 	_ = os.Chdir(tmp)
-	defer os.Chdir(orig)
+	defer func() { _ = os.Chdir(orig) }()
 
 	ctx, err := Load("")
 	if err != nil {
@@ -49,7 +49,7 @@ resource_group: rg-test
 mode: terragrunt
 platform: ado
 `
-	if err := os.WriteFile(cfg, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(cfg, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
