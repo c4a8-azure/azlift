@@ -12,6 +12,18 @@ linters:
     - gosec         # security issues
     - nilerr        # nil error returned incorrectly
 
+  settings:
+    gosec:
+      excludes:
+        - G204  # subprocess with variable — intentional (we wrap external CLIs)
+
+  exclusions:
+    rules:
+      - path: "_test\\.go"
+        linters:
+          - gosec
+          - errcheck
+
 formatters:
   enable:
     - gofmt
@@ -24,15 +36,5 @@ formatters:
       local-prefixes:
         - github.com/c4a8-azure/azlift
 
-linters-settings:
-  gosec:
-    excludes:
-      - G204  # subprocess with variable — intentional (we wrap external CLIs)
-
 issues:
   max-same-issues: 0
-  exclude-rules:
-    - path: "_test\\.go"
-      linters:
-        - gosec
-        - errcheck
