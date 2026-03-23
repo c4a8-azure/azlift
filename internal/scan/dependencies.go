@@ -131,8 +131,10 @@ func extractVMRefs(props map[string]any) []reference {
 	if sp, ok := props["storageProfile"].(map[string]any); ok {
 		if os, ok := sp["osDisk"].(map[string]any); ok {
 			if enc, ok := os["managedDisk"].(map[string]any); ok {
-				if id, _ := enc["diskEncryptionSet"].(map[string]any)["id"].(string); id != "" {
-					refs = append(refs, reference{id: id, reason: "Disk Encryption Set reference"})
+				if des, ok := enc["diskEncryptionSet"].(map[string]any); ok {
+					if id, _ := des["id"].(string); id != "" {
+						refs = append(refs, reference{id: id, reason: "Disk Encryption Set reference"})
+					}
 				}
 			}
 		}
