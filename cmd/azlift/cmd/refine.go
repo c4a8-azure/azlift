@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/c4a8-azure/azlift/internal/refine"
+	"github.com/c4a8-azure/azlift/internal/terragrunt"
 )
 
 func newRefineCmd() *cobra.Command {
@@ -38,35 +39,43 @@ func runRefine(cmd *cobra.Command, _ []string) error {
 	skipLint, _ := cmd.Flags().GetBool("skip-lint")
 	skipDocs, _ := cmd.Flags().GetBool("skip-docs")
 
-	if mode != "modules" {
-		Log.Warn("Terragrunt mode is not yet implemented; falling back to modules mode")
-	}
+	log := Log.WithStage("REFINE")
+	log.Info(fmt.Sprintf("refining %s → %s (mode: %s)", inputDir, outputDir, mode))
 
-	Log.WithStage("REFINE").Info(fmt.Sprintf("refining %s → %s", inputDir, outputDir))
-
+	// Run the core modules-mode pipeline regardless of output mode.
+	// For Terragrunt mode the grouped files become module sources.
 	result, err := refine.Run(cmd.Context(), refine.Options{
 		InputDir:      inputDir,
 		OutputDir:     outputDir,
 		ResourceGroup: rg,
-		SkipLint:      skipLint,
+		SkipLint:      skipLint || mode == "terragrunt", // tflint not meaningful on TG layout
 		SkipDocs:      skipDocs,
 	})
 	if err != nil {
 		return err
 	}
 
-	Log.WithStage("REFINE").Info(fmt.Sprintf("wrote %d files to %s", len(result.Files), outputDir))
+	log.Info(fmt.Sprintf("wrote %d files to %s", len(result.Files), outputDir))
 
 	if result.Lint.Skipped {
-		Log.WithStage("REFINE").Info("lint skipped")
+		log.Info("lint skipped")
 	} else {
-		Log.WithStage("REFINE").Info(fmt.Sprintf("lint: %d issue(s)", result.Lint.Issues))
+		log.Info(fmt.Sprintf("lint: %d issue(s)", result.Lint.Issues))
 	}
 
 	if result.Docs.Skipped {
-		Log.WithStage("REFINE").Info("docs skipped")
+		log.Info("docs skipped")
 	} else {
-		Log.WithStage("REFINE").Info("docs: README.md generated")
+		log.Info("docs: README.md generated")
+	}
+
+	if mode == "terragrunt" {
+		log.Info("generating Terragrunt layout")
+		tgOpts := terragrunt.DefaultOptions(outputDir)
+		if err := terragrunt.Run(result.Files, tgOpts); err != nil {
+			return fmt.Errorf("terragrunt layout: %w", err)
+		}
+		log.Info("Terragrunt layout written")
 	}
 
 	return nil
