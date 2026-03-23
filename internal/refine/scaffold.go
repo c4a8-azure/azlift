@@ -1,0 +1,147 @@
+package refine
+
+import (
+	"fmt"
+	"path/filepath"
+
+	"github.com/hashicorp/hcl/v2/hclwrite"
+	"github.com/zclconf/go-cty/cty"
+)
+
+// BackendConfig carries the values needed to write an azurerm backend block.
+// Fields that are empty strings become placeholder comments in the output.
+type BackendConfig struct {
+	// ResourceGroupName of the Terraform state storage resource group.
+	ResourceGroupName string
+	// StorageAccountName holds the state storage account.
+	StorageAccountName string
+	// ContainerName is the blob container used for state files.
+	ContainerName string
+	// StateKey is the blob path, typically "<rg-name>/terraform.tfstate".
+	StateKey string
+}
+
+// DefaultBackendConfig returns a BackendConfig with sensible placeholder values
+// that can be replaced after BOOTSTRAP runs.
+func DefaultBackendConfig(resourceGroup string) BackendConfig {
+	return BackendConfig{
+		ResourceGroupName:  "rg-tfstate", // placeholder
+		StorageAccountName: "sttfstate",  // placeholder
+		ContainerName:      "tfstate",
+		StateKey:           fmt.Sprintf("%s/terraform.tfstate", resourceGroup),
+	}
+}
+
+// GenerateBackend writes backend.tf into outputDir. If cfg fields are empty,
+// placeholder strings are used so the file is always valid HCL.
+func GenerateBackend(outputDir string, cfg BackendConfig) (*ParsedFile, error) {
+	pf := NewFile(filepath.Join(outputDir, "backend.tf"))
+	body := pf.File.Body()
+
+	tfBlock := body.AppendNewBlock("terraform", nil)
+	beBlock := tfBlock.Body().AppendNewBlock("backend", []string{"azurerm"})
+	be := beBlock.Body()
+
+	be.SetAttributeValue("resource_group_name", cty.StringVal(orPlaceholder(cfg.ResourceGroupName, "<resource_group_name>")))
+	be.SetAttributeValue("storage_account_name", cty.StringVal(orPlaceholder(cfg.StorageAccountName, "<storage_account_name>")))
+	be.SetAttributeValue("container_name", cty.StringVal(orPlaceholder(cfg.ContainerName, "tfstate")))
+	be.SetAttributeValue("key", cty.StringVal(orPlaceholder(cfg.StateKey, "terraform.tfstate")))
+
+	return pf, nil
+}
+
+// ProviderPin describes a required_providers entry.
+type ProviderPin struct {
+	Source  string
+	Version string
+}
+
+// DefaultProviderPins returns the standard azurerm + azapi pins used by azlift.
+var DefaultProviderPins = []ProviderPin{
+	{Source: "hashicorp/azurerm", Version: "~> 4.0"},
+	{Source: "azure/azapi", Version: "~> 2.0"},
+}
+
+// GenerateVersions writes versions.tf into outputDir with a terraform block
+// containing required_version and required_providers.
+func GenerateVersions(outputDir string, minTerraformVersion string, pins []ProviderPin) (*ParsedFile, error) {
+	if minTerraformVersion == "" {
+		minTerraformVersion = ">= 1.5.0"
+	}
+	if len(pins) == 0 {
+		pins = DefaultProviderPins
+	}
+
+	pf := NewFile(filepath.Join(outputDir, "versions.tf"))
+	body := pf.File.Body()
+
+	tfBlock := body.AppendNewBlock("terraform", nil)
+	tfBody := tfBlock.Body()
+
+	tfBody.SetAttributeValue("required_version", cty.StringVal(minTerraformVersion))
+
+	rpBlock := tfBody.AppendNewBlock("required_providers", nil)
+	rpBody := rpBlock.Body()
+
+	for _, pin := range pins {
+		// Each provider is an object: { source = "...", version = "..." }
+		rpBody.SetAttributeRaw(
+			providerAlias(pin.Source),
+			tokensForProviderObject(pin.Source, pin.Version),
+		)
+	}
+
+	return pf, nil
+}
+
+// GenerateProvider writes a minimal provider block for azurerm.
+func GenerateProvider(outputDir string) (*ParsedFile, error) {
+	pf := NewFile(filepath.Join(outputDir, "providers.tf"))
+	body := pf.File.Body()
+
+	p := body.AppendNewBlock("provider", []string{"azurerm"})
+	p.Body().AppendNewBlock("features", nil)
+
+	return pf, nil
+}
+
+// providerAlias derives the local alias from "org/name" → "name".
+func providerAlias(source string) string {
+	parts := splitLast(source, "/")
+	return parts[len(parts)-1]
+}
+
+// splitLast splits s by sep and returns all parts.
+func splitLast(s, sep string) []string {
+	for i := len(s) - 1; i >= 0; i-- {
+		if string(s[i]) == sep {
+			return []string{s[:i], s[i+1:]}
+		}
+	}
+	return []string{s}
+}
+
+// tokensForProviderObject builds the RHS token sequence for:
+//
+//	{ source = "hashicorp/azurerm", version = "~> 4.0" }
+func tokensForProviderObject(source, version string) hclwrite.Tokens {
+	// Build a throwaway file with the object literal, then extract the tokens.
+	src := fmt.Sprintf(`x = { source = %q, version = %q }`, source, version)
+	f, diags := hclwrite.ParseConfig([]byte(src+"\n"), "<gen>", initPos)
+	if diags.HasErrors() {
+		// Fallback: plain string value.
+		return hclwrite.TokensForValue(cty.StringVal(source))
+	}
+	attrs := f.Body().Attributes()
+	if a, ok := attrs["x"]; ok {
+		return a.Expr().BuildTokens(nil)
+	}
+	return hclwrite.TokensForValue(cty.StringVal(source))
+}
+
+func orPlaceholder(val, placeholder string) string {
+	if val == "" {
+		return placeholder
+	}
+	return val
+}
