@@ -1,6 +1,6 @@
 module github.com/c4a8-azure/azlift
 
-go 1.22.0
+go 1.25.0
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
