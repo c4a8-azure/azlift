@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/c4a8-azure/azlift/internal/logger"
 	"github.com/spf13/cobra"
+
+	"github.com/c4a8-azure/azlift/internal/logger"
 )
 
 var (

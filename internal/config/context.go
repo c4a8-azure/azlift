@@ -7,7 +7,7 @@ package config
 type Mode string
 
 const (
-	ModeModules   Mode = "modules"
+	ModeModules    Mode = "modules"
 	ModeTerragrunt Mode = "terragrunt"
 )
 
@@ -29,9 +29,9 @@ type PipelineContext struct {
 	ResourceGroup  string `yaml:"resource_group"`
 
 	// Directories — populated during execution; can be seeded from config
-	ScanOutputDir      string `yaml:"scan_output_dir"`
-	ExportOutputDir    string `yaml:"export_output_dir"`
-	RefineOutputDir    string `yaml:"refine_output_dir"`
+	ScanOutputDir   string `yaml:"scan_output_dir"`
+	ExportOutputDir string `yaml:"export_output_dir"`
+	RefineOutputDir string `yaml:"refine_output_dir"`
 
 	// Behaviour flags
 	Mode        Mode     `yaml:"mode"`

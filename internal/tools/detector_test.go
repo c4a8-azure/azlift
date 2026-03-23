@@ -31,11 +31,11 @@ func TestExtractVersion(t *testing.T) {
 
 func TestCheckMinVersion_Passing(t *testing.T) {
 	cases := [][2]string{
-		{"2.57.0", "2.50.0"},  // newer minor
-		{"3.0.0", "2.50.0"},   // newer major
-		{"2.50.0", "2.50.0"},  // exactly equal
-		{"0.15.0", "0.14.0"},  // newer minor, zero major
-		{"1.6.3", "1.5.0"},    // newer minor
+		{"2.57.0", "2.50.0"}, // newer minor
+		{"3.0.0", "2.50.0"},  // newer major
+		{"2.50.0", "2.50.0"}, // exactly equal
+		{"0.15.0", "0.14.0"}, // newer minor, zero major
+		{"1.6.3", "1.5.0"},   // newer minor
 	}
 	for _, c := range cases {
 		if err := checkMinVersion("tool", c[0], parseMin(c[1]), "url"); err != nil {
@@ -46,9 +46,9 @@ func TestCheckMinVersion_Passing(t *testing.T) {
 
 func TestCheckMinVersion_Failing(t *testing.T) {
 	cases := [][2]string{
-		{"2.49.9", "2.50.0"},  // older minor
-		{"1.9.0", "2.0.0"},    // older major
-		{"0.13.5", "0.14.0"},  // older minor, zero major
+		{"2.49.9", "2.50.0"}, // older minor
+		{"1.9.0", "2.0.0"},   // older major
+		{"0.13.5", "0.14.0"}, // older minor, zero major
 	}
 	for _, c := range cases {
 		if err := checkMinVersion("tool", c[0], parseMin(c[1]), "url"); err == nil {
@@ -72,7 +72,7 @@ func TestCheckResult_String_OK(t *testing.T) {
 
 func TestCheckResult_String_Fail(t *testing.T) {
 	r := CheckResult{
-		Tool: &Tool{Name: "az"},
+		Tool:  &Tool{Name: "az"},
 		Found: false,
 		Err:   fmt.Errorf("az: not found"),
 	}
@@ -85,6 +85,6 @@ func TestCheckResult_String_Fail(t *testing.T) {
 // parseMin parses "major.minor.patch" into [3]int — test helper only.
 func parseMin(v string) [3]int {
 	var a, b, c int
-	fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c)
+	_, _ = fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c)
 	return [3]int{a, b, c}
 }

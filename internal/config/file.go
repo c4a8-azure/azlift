@@ -34,7 +34,7 @@ func Load(path string) (*PipelineContext, error) {
 		return ctx, nil
 	}
 
-	data, err := os.ReadFile(resolved)
+	data, err := os.ReadFile(resolved) //nolint:gosec // path is user-supplied config file, not untrusted input
 	if err != nil {
 		return nil, fmt.Errorf("reading config %s: %w", resolved, err)
 	}

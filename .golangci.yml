@@ -1,0 +1,40 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck      # unchecked errors
+    - govet         # suspicious constructs (includes copylocks check)
+    - ineffassign   # ineffectual assignments
+    - staticcheck   # static analysis (includes gosimple rules)
+    - unused        # unused code
+    - misspell      # common misspellings
+    - gosec         # security issues
+    - nilerr        # nil error returned incorrectly
+
+  settings:
+    gosec:
+      excludes:
+        - G204  # subprocess with variable — intentional (we wrap external CLIs)
+
+  exclusions:
+    rules:
+      - path: "_test\\.go"
+        linters:
+          - gosec
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes:
+        - github.com/c4a8-azure/azlift
+
+issues:
+  max-same-issues: 0
