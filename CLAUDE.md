@@ -81,6 +81,12 @@ Work is tracked as epics with sub-issues. The mandatory sequencing:
 - **#5**, **#6**, **#7** can proceed in parallel once **#4** is done — they are independent extensions of the refine output.
 - **#8 RUN** is last — it orchestrates all stages end-to-end and requires every other epic to be complete.
 
+## Git Workflow
+
+- **One branch per issue** — when starting work on any GitHub issue, create a branch named `issue-<number>-<short-slug>` (e.g. `issue-9-go-module-init`).
+- **Commit often** — commit at each logical checkpoint within the issue (e.g. after scaffolding files, after tests pass, after wiring into CLI). Small commits are easier to review and revert.
+- **PR per issue** — open a pull request from the issue branch to `main` when the issue is complete; reference the issue in the PR body so GitHub closes it on merge.
+
 ## Key Design Constraints
 
 - **Dark mode by default** — the tool never applies changes; it generates code and runs `terraform plan` only. Users explicitly import after reviewing.
