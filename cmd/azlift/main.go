@@ -2,14 +2,12 @@ package main
 
 import (
 	"os"
+
+	"github.com/c4a8-azure/azlift/cmd/azlift/cmd"
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := cmd.Execute(); err != nil {
 		os.Exit(1)
 	}
-}
-
-func run() error {
-	return nil
 }
