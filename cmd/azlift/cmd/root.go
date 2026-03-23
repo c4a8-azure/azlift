@@ -55,6 +55,7 @@ func init() {
 		newRefineCmd(),
 		newBootstrapCmd(),
 		newRunCmd(),
+		newCheckCmd(),
 	)
 
 	// Initialise a default logger before PersistentPreRunE fires (e.g. for
