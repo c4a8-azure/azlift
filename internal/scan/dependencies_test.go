@@ -115,6 +115,34 @@ func TestAnalyseDependencies_NoProperties(t *testing.T) {
 	}
 }
 
+// TestAnalyseDependencies_VMNilDiskEncryptionSet reproduces the panic that
+// occurred with real Azure data: managedDisk present but diskEncryptionSet nil.
+func TestAnalyseDependencies_VMNilDiskEncryptionSet(t *testing.T) {
+	groups := makeGroups(map[string][]ResourceSummary{
+		"rg-app": {
+			{
+				ID:            "/subscriptions/sub/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm1",
+				Type:          "microsoft.compute/virtualmachines",
+				ResourceGroup: "rg-app",
+				Properties: map[string]any{
+					"storageProfile": map[string]any{
+						"osDisk": map[string]any{
+							"managedDisk": map[string]any{
+								"diskEncryptionSet": nil, // real Azure returns nil when not set
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	// Must not panic.
+	graph := AnalyseDependencies(groups)
+	if len(graph.Edges) != 0 {
+		t.Errorf("expected no edges for VM without cross-RG refs, got %d", len(graph.Edges))
+	}
+}
+
 func TestResourceGroupFromID(t *testing.T) {
 	cases := []struct{ id, want string }{
 		{"/subscriptions/sub/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm1", "rg-prod"},
