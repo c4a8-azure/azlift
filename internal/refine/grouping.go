@@ -172,6 +172,14 @@ func GroupResources(files []*ParsedFile, outputDir string) []*ParsedFile {
 
 	for _, pf := range files {
 		for _, block := range pf.File.Body().Blocks() {
+			// Skip blocks that the scaffold generates into separate files:
+			//   terraform {}  → versions.tf + backend.tf
+			//   provider {}   → providers.tf
+			// Keeping them here would cause Terraform to error on duplicate blocks.
+			if block.Type() == "terraform" || block.Type() == "provider" {
+				continue
+			}
+
 			var dest string
 			if block.Type() == "resource" && len(block.Labels()) >= 1 {
 				dest = targetFile(block.Labels()[0])

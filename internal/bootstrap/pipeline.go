@@ -186,7 +186,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	// 6b. Managed Identities + OIDC + RBAC.
-	rbacScopes := buildRBACScopes(targetSub, opts.ResourceGroups)
+	// Always include the state storage RG so MIs can read the storage account
+	// during `terraform init` (requires Microsoft.Storage/storageAccounts/read).
+	rbacScopes := buildRBACScopes(targetSub, opts.ResourceGroups, stateCfg.ResourceGroupName)
 	log.Info("bootstrap: provisioning Managed Identities", "environments", envs)
 	idResult, err := ProvisionIdentities(ctx, cred, IdentityProvisionConfig{
 		SubscriptionID: targetSub,
@@ -342,15 +344,26 @@ func initRepo(
 }
 
 // buildRBACScopes constructs full Azure scope strings for role assignments.
-// Same-tenant: one scope per managed resource group.
+// Same-tenant: one scope per managed resource group, plus the state storage RG.
 // Cross-tenant (or no RGs specified): subscription scope.
-func buildRBACScopes(subscriptionID string, resourceGroups []string) []string {
+// Duplicates are deduplicated.
+func buildRBACScopes(subscriptionID string, resourceGroups []string, extraRGs ...string) []string {
+	seen := map[string]bool{}
+	add := func(rg string) string {
+		return fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionID, rg)
+	}
+
 	if len(resourceGroups) == 0 {
 		return []string{fmt.Sprintf("/subscriptions/%s", subscriptionID)}
 	}
-	scopes := make([]string, len(resourceGroups))
-	for i, rg := range resourceGroups {
-		scopes[i] = fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", subscriptionID, rg)
+
+	var scopes []string
+	for _, rg := range append(resourceGroups, extraRGs...) {
+		scope := add(rg)
+		if !seen[scope] {
+			seen[scope] = true
+			scopes = append(scopes, scope)
+		}
 	}
 	return scopes
 }

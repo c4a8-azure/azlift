@@ -53,8 +53,10 @@ func TestGroupResources_SplitsIntoFiles(t *testing.T) {
 	if _, ok := fileMap["data.tf"]; !ok {
 		t.Error("expected data.tf")
 	}
+	// main.tf contains the catch-all unknown resource; terraform/provider blocks
+	// are stripped here because scaffold writes them to versions.tf/providers.tf.
 	if _, ok := fileMap["main.tf"]; !ok {
-		t.Error("expected main.tf (catch-all + terraform block)")
+		t.Error("expected main.tf (catch-all for unknown resource types)")
 	}
 }
 
@@ -107,22 +109,25 @@ func TestGroupResources_UnknownTypeGoesToMain(t *testing.T) {
 	t.Error("main.tf not found in output")
 }
 
-func TestGroupResources_TerraformBlockInMain(t *testing.T) {
+func TestGroupResources_TerraformBlockStripped(t *testing.T) {
 	tmp := t.TempDir()
 	writeTFFile(t, tmp, "main.tf", mixedHCL)
 	files, _ := ParseDir(tmp)
 
 	out := GroupResources(files, tmp)
 
+	// terraform {} and provider {} blocks must NOT appear in any grouped output
+	// file — scaffold writes them to versions.tf/providers.tf/backend.tf to avoid
+	// "duplicate block" errors from Terraform.
 	for _, pf := range out {
-		if filepath.Base(pf.Path) == "main.tf" {
-			if !strings.Contains(string(pf.File.Bytes()), "required_version") {
-				t.Error("terraform block should be in main.tf")
-			}
-			return
+		content := string(pf.File.Bytes())
+		if strings.Contains(content, "required_version") {
+			t.Errorf("terraform block leaked into %s — should be stripped by GroupResources", filepath.Base(pf.Path))
+		}
+		if strings.Contains(content, `provider "azurerm"`) {
+			t.Errorf("provider block leaked into %s — should be stripped by GroupResources", filepath.Base(pf.Path))
 		}
 	}
-	t.Error("main.tf not found in output")
 }
 
 func TestGroupResources_EmptyInput(t *testing.T) {
