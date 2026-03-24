@@ -1,7 +1,6 @@
 package bootstrap
 
 import (
-	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -29,7 +28,7 @@ var saNameRe = regexp.MustCompile(`^[a-z0-9]{3,24}$`)
 //
 // Naming rules:
 //   - RG:  rg-tfstate-<sanitised-repo>
-//   - SA:  st + first 20 chars of sanitised repo (lowercase alphanum only, 3–24)
+//   - SA:  st + first 22 chars of sanitised repo (lowercase alphanum only, 3–24)
 //   - Container: "tfstate"
 func DeriveStateConfig(subscriptionID, repoName, location string) StateStorageConfig {
 	if location == "" {
@@ -60,26 +59,6 @@ func DeriveStateConfig(subscriptionID, repoName, location string) StateStorageCo
 	}
 }
 
-// ProvisionStateStorage runs az-bootstrap to provision the state storage
-// resources. The runner streams az CLI / PowerShell output to logLine.
-// The operation is idempotent — running it twice against existing resources
-// is safe.
-func ProvisionStateStorage(ctx context.Context, runner Runner, cfg StateStorageConfig, logLine func(string)) error {
-	args := []string{
-		"state-storage",
-		"--subscription-id", cfg.SubscriptionID,
-		"--resource-group", cfg.ResourceGroupName,
-		"--storage-account", cfg.StorageAccountName,
-		"--container", cfg.ContainerName,
-		"--location", cfg.Location,
-	}
-
-	if err := runner.Run(ctx, args, logLine); err != nil {
-		return fmt.Errorf("provisioning state storage: %w", err)
-	}
-	return nil
-}
-
 // ValidateStateConfig returns an error if cfg contains obviously invalid values.
 func ValidateStateConfig(cfg StateStorageConfig) error {
 	if cfg.SubscriptionID == "" {
@@ -98,7 +77,6 @@ func ValidateStateConfig(cfg StateStorageConfig) error {
 // safe for use in Azure resource names.
 func sanitiseRepoName(name string) string {
 	name = strings.ToLower(name)
-	// Replace any non-alphanumeric character with a hyphen.
 	var sb strings.Builder
 	for _, r := range name {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
@@ -107,7 +85,6 @@ func sanitiseRepoName(name string) string {
 			sb.WriteByte('-')
 		}
 	}
-	// Collapse consecutive hyphens and trim leading/trailing.
 	result := sb.String()
 	for strings.Contains(result, "--") {
 		result = strings.ReplaceAll(result, "--", "-")

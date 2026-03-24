@@ -35,7 +35,6 @@ func TestWriteAzBootstrapConfig_CreatesFile(t *testing.T) {
 		SchemaVersion:  "1",
 		SubscriptionID: "sub-123",
 		TenantID:       "tenant-456",
-		Identities:     map[string]string{"prod/plan": "client-id-1"},
 	}
 
 	if err := writeAzBootstrapConfig(tmp, cfg); err != nil {
@@ -52,8 +51,8 @@ func TestWriteAzBootstrapConfig_CreatesFile(t *testing.T) {
 	if !strings.Contains(out, "sub-123") {
 		t.Error("expected subscription ID in .azbootstrap.jsonc")
 	}
-	if !strings.Contains(out, "client-id-1") {
-		t.Error("expected MI client ID in .azbootstrap.jsonc")
+	if !strings.Contains(out, "tenant-456") {
+		t.Error("expected tenant ID in .azbootstrap.jsonc")
 	}
 }
 
