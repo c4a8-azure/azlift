@@ -129,10 +129,12 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	result.StateStorage = stateCfg
 
+	// MIs always go into the state RG alongside the storage account.
+	// This keeps all azlift CI/CD infrastructure co-located and prevents
+	// MIs from appearing in aztfexport output on re-runs.
+	// The --mi-resource-group flag overrides for cases where a shared
+	// identity RG already exists.
 	miRG := opts.MIResourceGroup
-	if miRG == "" && len(opts.ResourceGroups) > 0 {
-		miRG = opts.ResourceGroups[0]
-	}
 	if miRG == "" {
 		miRG = stateCfg.ResourceGroupName
 	}
