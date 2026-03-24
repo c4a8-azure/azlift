@@ -116,3 +116,15 @@ func AllBlocks(files []*ParsedFile, blockType string) []*hclwrite.Block {
 func NewFile(path string) *ParsedFile {
 	return &ParsedFile{Path: path, File: hclwrite.NewEmptyFile()}
 }
+
+// ReplaceContent re-parses src and replaces pf's in-memory AST with the
+// result. Used by the AI enrichment pass to update files after the model
+// returns modified HCL.
+func ReplaceContent(pf *ParsedFile, src []byte) error {
+	f, diags := hclwrite.ParseConfig(src, pf.Path, hcl.Pos{Line: 1, Column: 1})
+	if diags.HasErrors() {
+		return fmt.Errorf("re-parsing enriched content for %s: %s", pf.Path, diags.Error())
+	}
+	pf.File = f
+	return nil
+}
