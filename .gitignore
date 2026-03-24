@@ -1,3 +1,8 @@
 bin/
 coverage.out
 *.out
+raw/
+refined/
+scan-result.json
+.azlift/
+.claude/

@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -24,7 +25,7 @@ func TestProvisionPlatform_GitHub(t *testing.T) {
 	m := &MockRunner{}
 	cfg := testPlatformConfig("github")
 
-	if err := ProvisionPlatform(context.Background(), m, cfg, nil); err != nil {
+	if _, err := ProvisionPlatform(context.Background(), m, cfg, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// 1 Invoke-AzBootstrap + 2 Add-AzBootstrapEnvironment = 3 calls
@@ -40,7 +41,7 @@ func TestProvisionPlatform_ADO(t *testing.T) {
 	m := &MockRunner{}
 	cfg := testPlatformConfig("ado")
 
-	err := ProvisionPlatform(context.Background(), m, cfg, nil)
+	_, err := ProvisionPlatform(context.Background(), m, cfg, nil)
 	if err == nil {
 		t.Error("expected error: ado not yet supported")
 	}
@@ -49,7 +50,7 @@ func TestProvisionPlatform_ADO(t *testing.T) {
 func TestProvisionPlatform_UnknownPlatform(t *testing.T) {
 	m := &MockRunner{}
 	cfg := testPlatformConfig("bitbucket")
-	err := ProvisionPlatform(context.Background(), m, cfg, nil)
+	_, err := ProvisionPlatform(context.Background(), m, cfg, nil)
 	if err == nil {
 		t.Error("expected error for unsupported platform")
 	}
@@ -59,7 +60,7 @@ func TestProvisionPlatform_PassesStateBackend(t *testing.T) {
 	m := &MockRunner{}
 	cfg := testPlatformConfig("github")
 
-	if err := ProvisionPlatform(context.Background(), m, cfg, nil); err != nil {
+	if _, err := ProvisionPlatform(context.Background(), m, cfg, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -73,7 +74,7 @@ func TestProvisionPlatform_PassesMINames(t *testing.T) {
 	m := &MockRunner{}
 	cfg := testPlatformConfig("github")
 
-	if err := ProvisionPlatform(context.Background(), m, cfg, nil); err != nil {
+	if _, err := ProvisionPlatform(context.Background(), m, cfg, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -87,15 +88,16 @@ func TestProvisionPlatform_AddsSubsequentEnvironments(t *testing.T) {
 	m := &MockRunner{}
 	cfg := testPlatformConfig("github")
 
-	if err := ProvisionPlatform(context.Background(), m, cfg, nil); err != nil {
+	if _, err := ProvisionPlatform(context.Background(), m, cfg, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Call 1: Invoke-AzBootstrap (prod)
 	// Call 2: Add-AzBootstrapEnvironment (staging)
 	// Call 3: Add-AzBootstrapEnvironment (dev)
-	if m.Calls[1][0] != "Add-AzBootstrapEnvironment" {
-		t.Errorf("call 2: want Add-AzBootstrapEnvironment, got %s", m.Calls[1][0])
+	// args[0] is prefixed with Set-Location so use Contains.
+	if !strings.Contains(m.Calls[1][0], "Add-AzBootstrapEnvironment") {
+		t.Errorf("call 2: want Add-AzBootstrapEnvironment in args[0], got %s", m.Calls[1][0])
 	}
 	assertArg(t, m.Calls[1], "-EnvironmentName", "staging")
 	assertArg(t, m.Calls[2], "-EnvironmentName", "dev")
@@ -104,7 +106,7 @@ func TestProvisionPlatform_AddsSubsequentEnvironments(t *testing.T) {
 func TestProvisionPlatform_RunnerError(t *testing.T) {
 	m := &MockRunner{Err: &ExitError{Code: 1, Stderr: "token expired"}}
 	cfg := testPlatformConfig("github")
-	err := ProvisionPlatform(context.Background(), m, cfg, nil)
+	_, err := ProvisionPlatform(context.Background(), m, cfg, nil)
 	if err == nil {
 		t.Error("expected error when runner fails")
 	}
@@ -115,7 +117,7 @@ func TestProvisionPlatform_SingleEnvironment(t *testing.T) {
 	cfg := testPlatformConfig("github")
 	cfg.Environments = []string{"prod"}
 
-	if err := ProvisionPlatform(context.Background(), m, cfg, nil); err != nil {
+	if _, err := ProvisionPlatform(context.Background(), m, cfg, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Only 1 call — no Add-AzBootstrapEnvironment needed.

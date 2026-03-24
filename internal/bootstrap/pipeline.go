@@ -93,7 +93,8 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		Location:        location,
 		StateStorage:    stateCfg,
 	}
-	if err := ProvisionPlatform(ctx, runner, platCfg, logLine); err != nil {
+	cloneDir, err := ProvisionPlatform(ctx, runner, platCfg, logLine)
+	if err != nil {
 		return result, err
 	}
 	log.Info("bootstrap: platform provisioned")
@@ -108,7 +109,8 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 			StateStorage:   stateCfg,
 		}
 		commitResult, err := CommitToRepo(ctx, CommitConfig{
-			RepoDir:           opts.InputDir,
+			RepoDir:           cloneDir,
+			SourceDir:         opts.InputDir,
 			SubscriptionID:    opts.SubscriptionID,
 			AzBootstrapConfig: absCfg,
 		})

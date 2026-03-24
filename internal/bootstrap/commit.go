@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,9 @@ import (
 type CommitConfig struct {
 	// RepoDir is the local clone path of the newly created repository.
 	RepoDir string
+	// SourceDir, when non-empty, has its contents copied into RepoDir before staging.
+	// Use this to plant the refined Terraform output into the bootstrapped repo.
+	SourceDir string
 	// SubscriptionID is recorded in the commit message.
 	SubscriptionID string
 	// AzBootstrapConfig is serialised as .azbootstrap.jsonc alongside the TF.
@@ -30,18 +34,26 @@ type CommitResult struct {
 }
 
 // CommitToRepo performs the initial commit of the refined Terraform output:
-//  1. Writes .azbootstrap.jsonc to repoDir (if config provided).
-//  2. git add -A.
-//  3. git commit with a standardised message.
+//  1. Copies SourceDir contents into RepoDir (if SourceDir is set).
+//  2. Writes .azbootstrap.jsonc to repoDir (if config provided).
+//  3. git add -A.
+//  4. git commit with a standardised message.
 func CommitToRepo(ctx context.Context, cfg CommitConfig) (CommitResult, error) {
-	// 1. Write .azbootstrap.jsonc.
+	// 1. Copy refined output into the repo.
+	if cfg.SourceDir != "" {
+		if err := copyDirContents(cfg.SourceDir, cfg.RepoDir); err != nil {
+			return CommitResult{}, fmt.Errorf("copying source to repo: %w", err)
+		}
+	}
+
+	// 2. Write .azbootstrap.jsonc.
 	if cfg.AzBootstrapConfig != nil {
 		if err := writeAzBootstrapConfig(cfg.RepoDir, cfg.AzBootstrapConfig); err != nil {
 			return CommitResult{}, err
 		}
 	}
 
-	// 2. Stage all files.
+	// 3. Stage all files.
 	if err := gitRun(ctx, cfg.RepoDir, "add", "-A"); err != nil {
 		return CommitResult{}, fmt.Errorf("git add: %w", err)
 	}
@@ -53,6 +65,41 @@ func CommitToRepo(ctx context.Context, cfg CommitConfig) (CommitResult, error) {
 	}
 
 	return CommitResult{Message: message}, nil
+}
+
+// copyDirContents copies all regular files from src into dst, preserving the
+// relative directory structure. dst must already exist.
+func copyDirContents(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode())
+		}
+		return copyFile(path, target, info.Mode())
+	})
+}
+
+// copyFile copies a single file from src to dst.
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src) //nolint:gosec
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }
 
 // gitRun executes a git command in dir and returns a combined error on failure.
