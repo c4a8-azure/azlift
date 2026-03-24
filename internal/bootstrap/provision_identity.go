@@ -114,7 +114,7 @@ func configureFederatedCredential(
 	cfg IdentityProvisionConfig,
 	env, role, miName string,
 ) error {
-	subject := oidcSubject(cfg.RepoOrg, cfg.RepoName, role)
+	subject := oidcSubject(cfg.RepoOrg, cfg.RepoName, env, role)
 	fcName := fmt.Sprintf("fc-%s-%s", env, role)
 
 	_, err := client.CreateOrUpdate(ctx, cfg.ResourceGroup, miName, fcName,
@@ -167,11 +167,14 @@ func buildRoleDefinitionID(subscriptionID, roleName string) string {
 }
 
 // oidcSubject returns the GitHub Actions OIDC subject claim for a given role.
-func oidcSubject(org, repo, role string) string {
-	if role == "apply" {
-		return fmt.Sprintf("repo:%s/%s:ref:refs/heads/main", org, repo)
-	}
-	return fmt.Sprintf("repo:%s/%s:pull_request", org, repo)
+//
+// When a workflow declares `environment:`, GitHub sets the subject to
+// "repo:{org}/{repo}:environment:{name}" regardless of the trigger.
+// Our workflows always use a named environment, so we must match that form.
+func oidcSubject(org, repo, env, role string) string {
+	// GitHub environment name mirrors what Write() puts in the workflow file.
+	ghEnv := fmt.Sprintf("%s-iac-%s", env, role)
+	return fmt.Sprintf("repo:%s/%s:environment:%s", org, repo, ghEnv)
 }
 
 // stringVal safely dereferences a *string, returning "" for nil.
