@@ -68,7 +68,7 @@ func provisionGitHub(ctx context.Context, runner Runner, cfg PlatformConfig, log
 		"-PlanManagedIdentityName", MIName(cfg.RepoName, firstEnv, "plan"),
 		"-ApplyManagedIdentityName", MIName(cfg.RepoName, firstEnv, "apply"),
 		"-TerraformStateStorageAccountName", cfg.StateStorage.StorageAccountName,
-		"-SkipConfirmation",
+		"-Confirm:$false", // SupportsShouldProcess — works on all module versions
 	}
 	if cfg.TemplateRepoUrl != "" {
 		args = append(args, "-TemplateRepoUrl", cfg.TemplateRepoUrl)

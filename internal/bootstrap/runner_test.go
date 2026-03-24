@@ -91,6 +91,18 @@ func TestBuildPSCommand_QuotesSingleQuotes(t *testing.T) {
 	}
 }
 
+func TestBuildPSCommand_ConfirmFalse(t *testing.T) {
+	// -Confirm:$false is a special PS form — must be emitted verbatim, not quoted
+	cmd := buildPSCommand([]string{"Invoke-AzBootstrap", "-Name", "repo", "-Confirm:$false"})
+	if !strings.Contains(cmd, "-Confirm:$false") {
+		t.Errorf("expected -Confirm:$false in command: %s", cmd)
+	}
+	// Must not be quoted as a value
+	if strings.Contains(cmd, "'-Confirm:$false'") {
+		t.Errorf("-Confirm:$false should not be single-quoted: %s", cmd)
+	}
+}
+
 func TestBuildPSCommand_Empty(t *testing.T) {
 	cmd := buildPSCommand(nil)
 	if cmd != "" {
