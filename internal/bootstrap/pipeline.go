@@ -235,21 +235,27 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if tfStateSearchDir == "" {
 		tfStateSearchDir = opts.InputDir
 	}
-	if tfStateSearchDir != "" {
-		tfstatePath := tfstatePath(tfStateSearchDir)
-		if fileExists(tfstatePath) {
-			log.Info("bootstrap: uploading terraform.tfstate to remote state")
-			if err := UploadTfState(ctx, cred, TfStateUploadConfig{
-				StorageAccountName: stateCfg.StorageAccountName,
-				ContainerName:      stateCfg.ContainerName,
-				BlobKey:            opts.RepoName + ".tfstate",
-				LocalPath:          tfstatePath,
-			}); err != nil {
-				return result, fmt.Errorf("uploading tfstate: %w", err)
-			}
-			log.Info("bootstrap: tfstate uploaded")
-		}
+	if tfStateSearchDir == "" {
+		return result, fmt.Errorf("TfStateDir and InputDir are both empty — cannot locate terraform.tfstate")
 	}
+	tfStatePath := tfstatePath(tfStateSearchDir)
+	if !fileExists(tfStatePath) {
+		return result, fmt.Errorf(
+			"terraform.tfstate not found at %s — aztfexport must have failed or the state was not written to the expected location; "+
+				"state storage container %s/%s was provisioned but is empty",
+			tfStatePath, stateCfg.StorageAccountName, stateCfg.ContainerName,
+		)
+	}
+	log.Info("bootstrap: uploading terraform.tfstate to remote state", "path", tfStatePath)
+	if err := UploadTfState(ctx, cred, TfStateUploadConfig{
+		StorageAccountName: stateCfg.StorageAccountName,
+		ContainerName:      stateCfg.ContainerName,
+		BlobKey:            opts.RepoName + ".tfstate",
+		LocalPath:          tfStatePath,
+	}); err != nil {
+		return result, fmt.Errorf("uploading tfstate: %w", err)
+	}
+	log.Info("bootstrap: tfstate uploaded", "blob", opts.RepoName+".tfstate")
 
 	log.Info("bootstrap: complete")
 	return result, nil
