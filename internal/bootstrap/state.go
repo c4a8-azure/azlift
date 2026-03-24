@@ -1,7 +1,6 @@
 package bootstrap
 
 import (
-	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -58,26 +57,6 @@ func DeriveStateConfig(subscriptionID, repoName, location string) StateStorageCo
 		ContainerName:      "tfstate",
 		Location:           location,
 	}
-}
-
-// ProvisionStateStorage runs az-bootstrap to provision the state storage
-// resources. The runner streams az CLI / PowerShell output to logLine.
-// The operation is idempotent — running it twice against existing resources
-// is safe.
-func ProvisionStateStorage(ctx context.Context, runner Runner, cfg StateStorageConfig, logLine func(string)) error {
-	args := []string{
-		"state-storage",
-		"--subscription-id", cfg.SubscriptionID,
-		"--resource-group", cfg.ResourceGroupName,
-		"--storage-account", cfg.StorageAccountName,
-		"--container", cfg.ContainerName,
-		"--location", cfg.Location,
-	}
-
-	if err := runner.Run(ctx, args, logLine); err != nil {
-		return fmt.Errorf("provisioning state storage: %w", err)
-	}
-	return nil
 }
 
 // ValidateStateConfig returns an error if cfg contains obviously invalid values.

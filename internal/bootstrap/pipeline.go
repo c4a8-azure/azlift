@@ -8,9 +8,9 @@ import (
 
 // Options drives the full bootstrap pipeline.
 type Options struct {
-	// SubscriptionID is the target Azure subscription.
+	// SubscriptionID is the target Azure subscription (used for state config naming).
 	SubscriptionID string
-	// TenantID is the Azure AD tenant (empty = resolved by az-bootstrap).
+	// TenantID is the Azure AD tenant (written to .azbootstrap.jsonc).
 	TenantID string
 	// RepoName is the Git repository to create.
 	RepoName string
@@ -25,6 +25,8 @@ type Options struct {
 	InputDir string
 	// Location is the Azure region for state storage. Defaults to westeurope.
 	Location string
+	// TemplateRepoUrl is passed to Invoke-AzBootstrap (optional).
+	TemplateRepoUrl string
 	// Runner is the az-bootstrap subprocess runner.
 	// Defaults to AzBootstrapRunner if nil.
 	Runner Runner
@@ -34,20 +36,18 @@ type Options struct {
 
 // Result summarises what the bootstrap pipeline produced.
 type Result struct {
-	// StateStorage is the provisioned state backend config.
+	// StateStorage holds the derived state backend config (names used for az-bootstrap).
 	StateStorage StateStorageConfig
-	// Identities maps "<env>/<role>" → ManagedIdentity.
-	Identities map[string]ManagedIdentity
-	// CommitMessage is the message of the initial commit.
+	// CommitMessage is the message of the initial commit (empty if InputDir was empty).
 	CommitMessage string
 }
 
 // Run executes the full bootstrap pipeline:
 //
-//  1. Provision state storage (RG, Storage Account, container).
-//  2. Provision Managed Identities with OIDC federated credentials.
-//  3. Provision Git platform (repo, environments, CI/CD variables).
-//  4. Commit refined Terraform into the new repo.
+//  1. Derive state storage names (DeriveStateConfig).
+//  2. Call az-bootstrap (Invoke-AzBootstrap + Add-AzBootstrapEnvironment) which
+//     creates the state storage, Managed Identities, OIDC federation, and Git repo.
+//  3. Commit refined Terraform into the repo (if InputDir is set).
 func Run(ctx context.Context, opts Options) (Result, error) {
 	var result Result
 	log := opts.Log
@@ -65,66 +65,40 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		envs = []string{"prod", "staging", "dev"}
 	}
 
+	location := opts.Location
+	if location == "" {
+		location = "westeurope"
+	}
+
 	logLine := func(line string) { log.Info("[az-bootstrap] " + line) }
 
-	// 1. State storage.
-	log.Info("bootstrap: provisioning state storage")
-	stateCfg := DeriveStateConfig(opts.SubscriptionID, opts.RepoName, opts.Location)
+	// Derive deterministic state storage names.
+	stateCfg := DeriveStateConfig(opts.SubscriptionID, opts.RepoName, location)
 	if err := ValidateStateConfig(stateCfg); err != nil {
 		return result, fmt.Errorf("invalid state config: %w", err)
 	}
-	if err := ProvisionStateStorage(ctx, runner, stateCfg, logLine); err != nil {
-		return result, err
-	}
 	result.StateStorage = stateCfg
-	log.Info(fmt.Sprintf("bootstrap: state storage ready — %s/%s", stateCfg.ResourceGroupName, stateCfg.StorageAccountName))
 
-	// 2. Managed Identities.
-	log.Info("bootstrap: provisioning Managed Identities")
-	oidc := OIDCConfig{
-		Platform: opts.Platform,
-		RepoOrg:  opts.RepoOrg,
-		RepoName: opts.RepoName,
-	}
-	idResult, err := ProvisionIdentities(
-		ctx, runner,
-		opts.SubscriptionID,
-		stateCfg.ResourceGroupName, // co-locate MIs with state storage RG
-		opts.RepoName,
-		envs,
-		oidc,
-		logLine,
-	)
-	if err != nil {
-		return result, err
-	}
-	result.Identities = idResult.Identities
-	log.Info(fmt.Sprintf("bootstrap: %d Managed Identities provisioned", len(idResult.Identities)))
+	log.Info(fmt.Sprintf("bootstrap: provisioning via az-bootstrap (platform: %s, repo: %s/%s)",
+		opts.Platform, opts.RepoOrg, opts.RepoName))
+	log.Info(fmt.Sprintf("bootstrap: state storage will be %s/%s",
+		stateCfg.ResourceGroupName, stateCfg.StorageAccountName))
 
-	// Build the client ID map for CI/CD variable injection.
-	clientIDs := make(map[string]string, len(idResult.Identities))
-	for key, mi := range idResult.Identities {
-		clientIDs[key] = mi.ClientID
-	}
-
-	// 3. Git platform.
-	log.Info(fmt.Sprintf("bootstrap: provisioning %s platform", opts.Platform))
 	platCfg := PlatformConfig{
-		Platform:       opts.Platform,
-		Org:            opts.RepoOrg,
-		RepoName:       opts.RepoName,
-		Environments:   envs,
-		Identities:     clientIDs,
-		StateStorage:   stateCfg,
-		SubscriptionID: opts.SubscriptionID,
-		TenantID:       opts.TenantID,
+		Platform:        opts.Platform,
+		Org:             opts.RepoOrg,
+		RepoName:        opts.RepoName,
+		TemplateRepoUrl: opts.TemplateRepoUrl,
+		Environments:    envs,
+		Location:        location,
+		StateStorage:    stateCfg,
 	}
 	if err := ProvisionPlatform(ctx, runner, platCfg, logLine); err != nil {
 		return result, err
 	}
 	log.Info("bootstrap: platform provisioned")
 
-	// 4. Commit Terraform into repo.
+	// Commit Terraform into repo.
 	if opts.InputDir != "" {
 		log.Info("bootstrap: committing Terraform output to repository")
 		absCfg := &AzBootstrapConfig{
@@ -132,10 +106,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 			SubscriptionID: opts.SubscriptionID,
 			TenantID:       opts.TenantID,
 			StateStorage:   stateCfg,
-			Identities:     clientIDs,
 		}
 		commitResult, err := CommitToRepo(ctx, CommitConfig{
-			RepoDir:           opts.InputDir, // treat InputDir as the cloned repo
+			RepoDir:           opts.InputDir,
 			SubscriptionID:    opts.SubscriptionID,
 			AzBootstrapConfig: absCfg,
 		})
