@@ -3,7 +3,6 @@ package bootstrap
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 )
@@ -69,28 +68,20 @@ func ConfigureEnvironments(ctx context.Context, cfg GHEnvironmentConfig) error {
 			return fmt.Errorf("creating environment %s: %w", envName, err)
 		}
 
-		// Set each variable.
+		// Set each variable (POST to create; PATCH to update if it already exists).
 		for _, v := range vars {
-			body, err := json.Marshal(map[string]string{
-				"name":  v.Name,
-				"value": v.Value,
-			})
-			if err != nil {
-				return err
-			}
-			varEndpoint := fmt.Sprintf("repos/%s/%s/environments/%s/variables", cfg.Org, cfg.Repo, envName)
+			varListEndpoint := fmt.Sprintf("repos/%s/%s/environments/%s/variables", cfg.Org, cfg.Repo, envName)
 			if err := ghRun(ctx, "",
-				"api", varEndpoint,
+				"api", varListEndpoint,
 				"--method=POST",
 				"--silent",
-				"--input=-",
-				"--",
-				"--body="+string(body),
+				"--field", fmt.Sprintf("name=%s", v.Name),
+				"--field", fmt.Sprintf("value=%s", v.Value),
 			); err != nil {
 				// 409 = variable already exists; update it instead.
-				putEndpoint := fmt.Sprintf("repos/%s/%s/environments/%s/variables/%s", cfg.Org, cfg.Repo, envName, v.Name)
+				varEndpoint := fmt.Sprintf("repos/%s/%s/environments/%s/variables/%s", cfg.Org, cfg.Repo, envName, v.Name)
 				if err2 := ghRun(ctx, "",
-					"api", putEndpoint,
+					"api", varEndpoint,
 					"--method=PATCH",
 					"--silent",
 					"--field", fmt.Sprintf("name=%s", v.Name),
