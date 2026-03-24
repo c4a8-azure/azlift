@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 
@@ -87,9 +89,21 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return result, fmt.Errorf("RepoOrg is required")
 	}
 
+	// Auto-detect tenant if not provided.
+	tenantID := opts.TenantID
+	if tenantID == "" {
+		detected, err := detectTenantID(ctx)
+		if err != nil {
+			return result, fmt.Errorf("detecting tenant ID: %w", err)
+		}
+		tenantID = detected
+	}
+	// Propagate resolved tenant back into opts so downstream helpers see it.
+	opts.TenantID = tenantID
+
 	envs := opts.Environments
 	if len(envs) == 0 {
-		envs = []string{"prod", "staging", "dev"}
+		envs = []string{"prod", "dev"}
 	}
 
 	location := opts.Location
@@ -352,6 +366,15 @@ func resolvedTenant(sourceTenant, targetTenant string) string {
 		return targetTenant
 	}
 	return sourceTenant
+}
+
+// detectTenantID calls `az account show` to discover the active tenant ID.
+func detectTenantID(ctx context.Context) (string, error) {
+	out, err := exec.CommandContext(ctx, "az", "account", "show", "--query", "tenantId", "-o", "tsv").Output()
+	if err != nil {
+		return "", fmt.Errorf("az account show: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // tfstatePath returns the expected path of the aztfexport state file.
