@@ -36,6 +36,10 @@ type Options struct {
 	Environments []string
 	// InputDir is the refined Terraform output to commit into the new repo.
 	InputDir string
+	// TfStateDir is the directory containing terraform.tfstate from aztfexport.
+	// Defaults to InputDir when empty. In a full pipeline run this is the raw
+	// export directory (e.g. .azlift/raw/<rg>), not the refined directory.
+	TfStateDir string
 	// Location is the Azure region for state storage. Defaults to westeurope.
 	Location string
 	// ResourceGroups are the RGs whose resources are being managed.
@@ -227,8 +231,12 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	// 6e. Upload tfstate (same-tenant: state from aztfexport is valid).
-	if opts.InputDir != "" {
-		tfstatePath := tfstatePath(opts.InputDir)
+	tfStateSearchDir := opts.TfStateDir
+	if tfStateSearchDir == "" {
+		tfStateSearchDir = opts.InputDir
+	}
+	if tfStateSearchDir != "" {
+		tfstatePath := tfstatePath(tfStateSearchDir)
 		if fileExists(tfstatePath) {
 			log.Info("bootstrap: uploading terraform.tfstate to remote state")
 			if err := UploadTfState(ctx, cred, TfStateUploadConfig{

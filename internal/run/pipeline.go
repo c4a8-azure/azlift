@@ -232,6 +232,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		RepoOrg:            opts.RepoOrg,
 		Environments:       opts.Environments,
 		InputDir:           refinedDir,
+		TfStateDir:         rgDir,
 		Location:           opts.Location,
 		ResourceGroups:     rgScope,
 		MIResourceGroup:    opts.MIResourceGroup,
