@@ -303,14 +303,13 @@ func initRepo(
 		return fmt.Errorf("generating bootstrap module: %w", err)
 	}
 
-	// backend.tf (placeholder for cross-tenant; will be overwritten after Activate for same-tenant).
+	// backend.tf: always write placeholders in the initial commit.
+	// Same-tenant: overwritten with real values after state storage is provisioned.
+	// Cross-tenant: placeholder stays; operator fills in after applying bootstrap/.
 	if err := WriteBackend(BackendConfig{
 		ContainerName: stateCfg.ContainerName,
 		Key:           opts.RepoName + ".tfstate",
-		Placeholder:   isCrossTenant,
-		// For same-tenant we write placeholders now and update after provisioning.
-		ResourceGroupName:  stateCfg.ResourceGroupName,
-		StorageAccountName: stateCfg.StorageAccountName,
+		Placeholder:   true,
 	}, repoDir); err != nil {
 		return fmt.Errorf("writing backend.tf: %w", err)
 	}

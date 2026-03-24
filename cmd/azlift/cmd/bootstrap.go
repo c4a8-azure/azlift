@@ -43,7 +43,7 @@ Example (cross-tenant):
 	cmd.Flags().String("input-dir", "./refined", "Directory containing refined Terraform output to commit")
 	cmd.Flags().String("repo-name", "", "Name of the Git repository to create (required)")
 	cmd.Flags().String("org", "", "GitHub organisation (required)")
-	cmd.Flags().StringSlice("environments", []string{"prod", "staging", "dev"}, "Deployment environments (comma-separated)")
+	cmd.Flags().StringSlice("environments", []string{"prod", "dev"}, "Deployment environments (comma-separated)")
 	cmd.Flags().String("location", "westeurope", "Azure region for state storage")
 	cmd.Flags().String("tenant-id", "", "Source Azure AD tenant ID (auto-detected if empty)")
 	cmd.Flags().String("target-subscription", "", "Target subscription for CI/CD resources (defaults to --subscription)")

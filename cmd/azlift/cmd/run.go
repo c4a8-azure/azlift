@@ -60,7 +60,7 @@ Example (cross-tenant):
 
 	// ── Output ────────────────────────────────────────────────────────────────
 	cmd.Flags().String("mode", "modules", "Output mode: modules or terragrunt")
-	cmd.Flags().StringSlice("environments", []string{"prod", "staging", "dev"}, "Deployment environments (comma-separated)")
+	cmd.Flags().StringSlice("environments", []string{"prod", "dev"}, "Deployment environments (comma-separated)")
 	cmd.Flags().String("location", "westeurope", "Azure region for state storage")
 	cmd.Flags().String("work-dir", ".azlift", "Base directory for all pipeline outputs")
 	cmd.Flags().String("workflows-dir", "", "Custom GitHub Actions workflows directory (default: embedded)")
