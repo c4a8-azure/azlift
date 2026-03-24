@@ -3,6 +3,7 @@ package export
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -38,8 +39,19 @@ type ExportOutput struct {
 }
 
 // PrepareOutputDir creates the per-RG subdirectory and returns its path.
+// If the directory already exists and is non-empty it is removed and
+// recreated — aztfexport refuses to write into a non-empty directory,
+// and the raw export is always regenerated fresh from Azure.
 func PrepareOutputDir(baseDir, resourceGroup string) (string, error) {
 	rgDir := filepath.Join(baseDir, resourceGroup)
+
+	if entries, err := os.ReadDir(rgDir); err == nil && len(entries) > 0 {
+		slog.Warn("[EXPORT] output directory is not empty — clearing for fresh export", "dir", rgDir)
+		if err := os.RemoveAll(rgDir); err != nil {
+			return "", fmt.Errorf("clearing stale output dir %s: %w", rgDir, err)
+		}
+	}
+
 	if err := os.MkdirAll(rgDir, 0o750); err != nil {
 		return "", fmt.Errorf("creating output dir %s: %w", rgDir, err)
 	}
