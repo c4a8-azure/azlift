@@ -95,12 +95,17 @@ func GenerateVersions(outputDir string, minTerraformVersion string, pins []Provi
 }
 
 // GenerateProvider writes a minimal provider block for azurerm.
+// storage_use_azuread = true prevents the provider from calling
+// listKeys on storage accounts during plan/apply — the plan MI only
+// has Reader, not the Contributor needed for that action.
 func GenerateProvider(outputDir string) (*ParsedFile, error) {
 	pf := NewFile(filepath.Join(outputDir, "providers.tf"))
 	body := pf.File.Body()
 
 	p := body.AppendNewBlock("provider", []string{"azurerm"})
-	p.Body().AppendNewBlock("features", nil)
+	pb := p.Body()
+	pb.SetAttributeValue("storage_use_azuread", cty.True)
+	pb.AppendNewBlock("features", nil)
 
 	return pf, nil
 }

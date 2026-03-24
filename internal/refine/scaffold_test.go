@@ -100,6 +100,9 @@ func TestGenerateProvider_AzurermBlock(t *testing.T) {
 	if !strings.Contains(out, "features") {
 		t.Errorf("providers.tf missing features block:\n%s", out)
 	}
+	if !strings.Contains(out, "storage_use_azuread") {
+		t.Errorf("providers.tf missing storage_use_azuread = true (required to avoid listKeys 403):\n%s", out)
+	}
 }
 
 func TestDefaultBackendConfig_StateKey(t *testing.T) {
