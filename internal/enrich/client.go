@@ -37,18 +37,30 @@ func NewClient() (*Client, error) {
 			"ANTHROPIC_API_KEY environment variable is not set; " +
 				"set it to your Anthropic API key before using --enrich")
 	}
-	c := anthropic.NewClient(option.WithAPIKey(key))
-	return &Client{api: c.Messages, model: DefaultModel}, nil
+	return newClientWithOptions(string(DefaultModel), option.WithAPIKey(key))
 }
 
-// NewClientWithModel constructs a Client with an explicit model name.
+// NewClientWithModel constructs a Client with an explicit model name,
+// reading the API key from ANTHROPIC_API_KEY.
 func NewClientWithModel(model string) (*Client, error) {
-	c, err := NewClient()
-	if err != nil {
-		return nil, err
+	key := os.Getenv("ANTHROPIC_API_KEY")
+	if key == "" {
+		return nil, errors.New(
+			"ANTHROPIC_API_KEY environment variable is not set; " +
+				"set it to your Anthropic API key before using --enrich")
 	}
-	c.model = model
-	return c, nil
+	return newClientWithOptions(model, option.WithAPIKey(key))
+}
+
+// newClientWithOptions is the internal constructor that accepts explicit options.
+// This allows the pipeline to pass the API key directly rather than re-reading
+// it from the environment on every call.
+func newClientWithOptions(model string, opts ...option.RequestOption) (*Client, error) {
+	if len(opts) == 0 {
+		return nil, errors.New("no API key option provided")
+	}
+	c := anthropic.NewClient(opts...)
+	return &Client{api: c.Messages, model: model}, nil
 }
 
 // EnrichRequest carries a single HCL file for enrichment.
@@ -89,7 +101,7 @@ func (c *Client) Enrich(ctx context.Context, req EnrichRequest) (EnrichResponse,
 	)
 
 	msg, err := c.api.New(ctx, anthropic.MessageNewParams{
-		Model:     c.model,
+		Model:     anthropic.Model(c.model),
 		MaxTokens: maxTokens,
 		System: []anthropic.TextBlockParam{
 			{Text: systemPrompt},

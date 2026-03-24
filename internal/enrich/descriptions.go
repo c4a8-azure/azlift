@@ -3,6 +3,8 @@ package enrich
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"path/filepath"
 	"strings"
 
 	"github.com/c4a8-azure/azlift/internal/refine"
@@ -35,7 +37,7 @@ func EnrichDescriptions(ctx context.Context, client *Client, pf *refine.ParsedFi
 	}
 
 	resp, err := client.Enrich(ctx, EnrichRequest{
-		Filename:    pf.Path,
+		Filename:    filepath.Base(pf.Path),
 		Content:     content,
 		Instruction: descriptionInstruction,
 	})
@@ -48,7 +50,11 @@ func EnrichDescriptions(ctx context.Context, client *Client, pf *refine.ParsedFi
 // EnrichDescriptionsAll runs EnrichDescriptions across all files that contain
 // variable or output blocks, updating the in-memory AST. Returns a count of
 // files that were enriched.
-func EnrichDescriptionsAll(ctx context.Context, client *Client, files []*refine.ParsedFile) (int, error) {
+func EnrichDescriptionsAll(ctx context.Context, client *Client, files []*refine.ParsedFile, log *slog.Logger) (int, error) {
+	if log == nil {
+		log = slog.Default()
+	}
+
 	enriched := 0
 	for _, pf := range files {
 		content := string(pf.File.Bytes())
@@ -56,16 +62,21 @@ func EnrichDescriptionsAll(ctx context.Context, client *Client, files []*refine.
 			continue
 		}
 
+		name := filepath.Base(pf.Path)
+		log.Debug(fmt.Sprintf("enrich: sending %s to AI for description generation", name))
+
 		newContent, err := EnrichDescriptions(ctx, client, pf)
 		if err != nil {
 			return enriched, err
 		}
 		if newContent != content {
-			// Re-parse the enriched content back into the ParsedFile's AST.
+			log.Debug(fmt.Sprintf("enrich: %s — descriptions updated", name))
 			if err := refine.ReplaceContent(pf, []byte(newContent)); err != nil {
 				return enriched, fmt.Errorf("updating AST for %s: %w", pf.Path, err)
 			}
 			enriched++
+		} else {
+			log.Debug(fmt.Sprintf("enrich: %s — no changes (already complete)", name))
 		}
 	}
 	return enriched, nil

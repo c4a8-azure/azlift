@@ -47,7 +47,7 @@ func TestEnrichDescriptionsAll_NilClientNoChange(t *testing.T) {
 	}
 	files, _ := refine.ParseDir(tmp)
 
-	count, err := EnrichDescriptionsAll(context.Background(), nil, files)
+	count, err := EnrichDescriptionsAll(context.Background(), nil, files, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
