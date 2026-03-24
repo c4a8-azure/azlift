@@ -7,7 +7,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/msi/armmsi"
 	"github.com/google/uuid"
 )
@@ -139,6 +139,9 @@ func assignRole(ctx context.Context, client *armauthorization.RoleAssignmentsCli
 		Properties: &armauthorization.RoleAssignmentProperties{
 			RoleDefinitionID: to.Ptr(roleDefinitionID),
 			PrincipalID:      to.Ptr(principalID),
+			// PrincipalType must be set to avoid PrincipalNotFound errors caused
+			// by AAD replication delay after MI creation.
+			PrincipalType: to.Ptr(armauthorization.PrincipalTypeServicePrincipal),
 		},
 	}, nil)
 	if err != nil {
