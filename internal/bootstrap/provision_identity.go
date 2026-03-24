@@ -14,8 +14,9 @@ import (
 
 const (
 	// Well-known Azure built-in role definition IDs (identical in all tenants).
-	roleIDReader      = "acdd72a7-3385-48ef-bd42-f606fba81ae7"
-	roleIDContributor = "b24988ac-6180-42a0-ab88-20f7382dd24c"
+	roleIDReader               = "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+	roleIDContributor          = "b24988ac-6180-42a0-ab88-20f7382dd24c"
+	roleIDStorageBlobDataContrib = "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
 
 	oidcIssuer   = "https://token.actions.githubusercontent.com"
 	oidcAudience = "api://AzureADTokenExchange"
@@ -40,6 +41,10 @@ type IdentityProvisionConfig struct {
 	// For same-tenant: one scope per managed resource group.
 	// For cross-tenant: single subscription scope.
 	RBACScopes []string
+	// StateStorageScope is the resource ID of the Terraform state storage account.
+	// All MIs receive Storage Blob Data Contributor here so that
+	// `terraform init` can access the backend without needing listKeys.
+	StateStorageScope string
 }
 
 // ProvisionedIdentities is the result of a ProvisionIdentities call.
@@ -91,11 +96,21 @@ func ProvisionIdentities(ctx context.Context, cred azcore.TokenCredential, cfg I
 				return result, err
 			}
 
-			// 3. Assign RBAC role on all scopes.
+			// 3. Assign RBAC role on all managed scopes (Reader for plan, Contributor for apply).
 			roleDefID := buildRoleDefinitionID(cfg.SubscriptionID, rbacRoleForRole(role))
 			for _, scope := range cfg.RBACScopes {
 				if err := assignRole(ctx, rbacClient, scope, roleDefID, stringVal(resp.Properties.PrincipalID)); err != nil {
 					return result, fmt.Errorf("assigning role for MI %s on %s: %w", miName, scope, err)
+				}
+			}
+
+			// 4. Assign Storage Blob Data Contributor on the state storage account
+			// so `terraform init` can access the backend via Azure AD auth
+			// (use_azuread_auth = true) without needing listKeys.
+			if cfg.StateStorageScope != "" {
+				blobRoleDefID := buildRoleDefinitionID(cfg.SubscriptionID, roleIDStorageBlobDataContrib)
+				if err := assignRole(ctx, rbacClient, cfg.StateStorageScope, blobRoleDefID, stringVal(resp.Properties.PrincipalID)); err != nil {
+					return result, fmt.Errorf("assigning Storage Blob Data Contributor for MI %s: %w", miName, err)
 				}
 			}
 

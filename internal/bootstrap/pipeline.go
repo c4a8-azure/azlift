@@ -186,18 +186,21 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	// 6b. Managed Identities + OIDC + RBAC.
-	// Always include the state storage RG so MIs can read the storage account
-	// during `terraform init` (requires Microsoft.Storage/storageAccounts/read).
-	rbacScopes := buildRBACScopes(targetSub, opts.ResourceGroups, stateCfg.ResourceGroupName)
+	rbacScopes := buildRBACScopes(targetSub, opts.ResourceGroups)
+	stateStorageScope := fmt.Sprintf(
+		"/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Storage/storageAccounts/%s",
+		targetSub, stateCfg.ResourceGroupName, stateCfg.StorageAccountName,
+	)
 	log.Info("bootstrap: provisioning Managed Identities", "environments", envs)
 	idResult, err := ProvisionIdentities(ctx, cred, IdentityProvisionConfig{
-		SubscriptionID: targetSub,
-		ResourceGroup:  miRG,
-		Location:       location,
-		RepoOrg:        opts.RepoOrg,
-		RepoName:       opts.RepoName,
-		Environments:   envs,
-		RBACScopes:     rbacScopes,
+		SubscriptionID:    targetSub,
+		ResourceGroup:     miRG,
+		Location:          location,
+		RepoOrg:           opts.RepoOrg,
+		RepoName:          opts.RepoName,
+		Environments:      envs,
+		RBACScopes:        rbacScopes,
+		StateStorageScope: stateStorageScope,
 	})
 	if err != nil {
 		return result, fmt.Errorf("provisioning identities: %w", err)

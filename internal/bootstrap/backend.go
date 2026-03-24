@@ -41,7 +41,7 @@ terraform {
     storage_account_name = "FILL_IN"
     container_name       = %q
     key                  = %q
-    use_oidc             = true
+    use_azuread_auth     = true
   }
 }
 `, container, cfg.Key)
@@ -52,7 +52,7 @@ terraform {
     storage_account_name = %q
     container_name       = %q
     key                  = %q
-    use_oidc             = true
+    use_azuread_auth     = true
   }
 }
 `,
