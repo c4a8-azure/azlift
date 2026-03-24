@@ -248,6 +248,8 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	log.Info("bootstrap: uploading terraform.tfstate to remote state", "path", tfStatePath)
 	if err := UploadTfState(ctx, cred, TfStateUploadConfig{
+		SubscriptionID:     targetSub,
+		ResourceGroupName:  stateCfg.ResourceGroupName,
 		StorageAccountName: stateCfg.StorageAccountName,
 		ContainerName:      stateCfg.ContainerName,
 		BlobKey:            opts.RepoName + ".tfstate",
