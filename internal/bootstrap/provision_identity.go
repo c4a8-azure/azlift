@@ -97,7 +97,7 @@ func ProvisionIdentities(ctx context.Context, cred azcore.TokenCredential, cfg I
 			}
 
 			// 3. Assign RBAC role on all managed scopes (Reader for plan, Contributor for apply).
-			roleDefID := buildRoleDefinitionID(cfg.SubscriptionID, rbacRoleForRole(role))
+			roleDefID := roleDefinitionID(cfg.SubscriptionID, roleGUIDForRole(role))
 			for _, scope := range cfg.RBACScopes {
 				if err := assignRole(ctx, rbacClient, scope, roleDefID, stringVal(resp.Properties.PrincipalID)); err != nil {
 					return result, fmt.Errorf("assigning role for MI %s on %s: %w", miName, scope, err)
@@ -108,7 +108,7 @@ func ProvisionIdentities(ctx context.Context, cred azcore.TokenCredential, cfg I
 			// so `terraform init` can access the backend via Azure AD auth
 			// (use_azuread_auth = true) without needing listKeys.
 			if cfg.StateStorageScope != "" {
-				blobRoleDefID := buildRoleDefinitionID(cfg.SubscriptionID, roleIDStorageBlobDataContrib)
+				blobRoleDefID := roleDefinitionID(cfg.SubscriptionID, roleIDStorageBlobDataContrib)
 				if err := assignRole(ctx, rbacClient, cfg.StateStorageScope, blobRoleDefID, stringVal(resp.Properties.PrincipalID)); err != nil {
 					return result, fmt.Errorf("assigning Storage Blob Data Contributor for MI %s: %w", miName, err)
 				}
@@ -169,15 +169,8 @@ func assignRole(ctx context.Context, client *armauthorization.RoleAssignmentsCli
 	return nil
 }
 
-// buildRoleDefinitionID returns the full resource ID for a built-in role.
-func buildRoleDefinitionID(subscriptionID, roleName string) string {
-	var guid string
-	switch roleName {
-	case "Contributor":
-		guid = roleIDContributor
-	default:
-		guid = roleIDReader
-	}
+// roleDefinitionID builds the full ARM resource ID for a built-in role GUID.
+func roleDefinitionID(subscriptionID, guid string) string {
 	return fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionID, guid)
 }
 
