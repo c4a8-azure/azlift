@@ -60,6 +60,56 @@ func TestExitError_NoStderr(t *testing.T) {
 	}
 }
 
+func TestBuildPSCommand_BasicCmdlet(t *testing.T) {
+	cmd := buildPSCommand([]string{"Invoke-AzBootstrap", "-TargetRepoName", "infra-prod", "-GitHubOwner", "my-org"})
+	if !strings.Contains(cmd, "Import-Module az-bootstrap") {
+		t.Errorf("expected module import in command: %s", cmd)
+	}
+	if !strings.Contains(cmd, "Invoke-AzBootstrap") {
+		t.Errorf("expected cmdlet in command: %s", cmd)
+	}
+	if !strings.Contains(cmd, "-TargetRepoName 'infra-prod'") {
+		t.Errorf("expected param in command: %s", cmd)
+	}
+}
+
+func TestBuildPSCommand_Switch(t *testing.T) {
+	cmd := buildPSCommand([]string{"Invoke-AzBootstrap", "-TargetRepoName", "repo", "-SkipConfirmation"})
+	if !strings.Contains(cmd, "-SkipConfirmation") {
+		t.Errorf("expected switch in command: %s", cmd)
+	}
+	// Switch should not be followed by a quoted value
+	if strings.Contains(cmd, "-SkipConfirmation '") {
+		t.Errorf("switch should not be quoted: %s", cmd)
+	}
+}
+
+func TestBuildPSCommand_QuotesSingleQuotes(t *testing.T) {
+	cmd := buildPSCommand([]string{"Invoke-AzBootstrap", "-Name", "it's-a-repo"})
+	if !strings.Contains(cmd, "it''s-a-repo") {
+		t.Errorf("single quotes in value should be escaped: %s", cmd)
+	}
+}
+
+func TestBuildPSCommand_ConfirmFalse(t *testing.T) {
+	// -Confirm:$false is a special PS form — must be emitted verbatim, not quoted
+	cmd := buildPSCommand([]string{"Invoke-AzBootstrap", "-Name", "repo", "-Confirm:$false"})
+	if !strings.Contains(cmd, "-Confirm:$false") {
+		t.Errorf("expected -Confirm:$false in command: %s", cmd)
+	}
+	// Must not be quoted as a value
+	if strings.Contains(cmd, "'-Confirm:$false'") {
+		t.Errorf("-Confirm:$false should not be single-quoted: %s", cmd)
+	}
+}
+
+func TestBuildPSCommand_Empty(t *testing.T) {
+	cmd := buildPSCommand(nil)
+	if cmd != "" {
+		t.Errorf("empty args should return empty string, got: %s", cmd)
+	}
+}
+
 func TestStreamLines_CollectsTail(t *testing.T) {
 	input := "line1\nline2\nline3\nline4\nline5\nline6\n"
 	var logged []string

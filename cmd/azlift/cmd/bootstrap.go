@@ -34,6 +34,7 @@ Example:
 	cmd.Flags().String("platform", "github", "CI/CD platform: github or ado")
 	cmd.Flags().String("location", "westeurope", "Azure region for state storage")
 	cmd.Flags().String("tenant-id", "", "Azure AD tenant ID (auto-detected if empty)")
+	cmd.Flags().String("template-repo-url", "", "GitHub template repo for Invoke-AzBootstrap (optional)")
 
 	_ = cmd.MarkFlagRequired("repo-name")
 	_ = cmd.MarkFlagRequired("org")
@@ -49,6 +50,7 @@ func runBootstrap(cmd *cobra.Command, _ []string) error {
 	platform, _ := cmd.Flags().GetString("platform")
 	location, _ := cmd.Flags().GetString("location")
 	tenantID, _ := cmd.Flags().GetString("tenant-id")
+	templateRepoUrl, _ := cmd.Flags().GetString("template-repo-url")
 
 	sub, _ := cmd.Root().PersistentFlags().GetString("subscription")
 	if sub == "" {
@@ -59,15 +61,16 @@ func runBootstrap(cmd *cobra.Command, _ []string) error {
 	log.Info(fmt.Sprintf("bootstrapping repo %s/%s on %s", org, repoName, platform))
 
 	result, err := bootstrap.Run(cmd.Context(), bootstrap.Options{
-		SubscriptionID: sub,
-		TenantID:       tenantID,
-		RepoName:       repoName,
-		RepoOrg:        org,
-		Platform:       platform,
-		Environments:   envs,
-		InputDir:       inputDir,
-		Location:       location,
-		Log:            Log.Slog(),
+		SubscriptionID:  sub,
+		TenantID:        tenantID,
+		RepoName:        repoName,
+		RepoOrg:         org,
+		Platform:        platform,
+		Environments:    envs,
+		InputDir:        inputDir,
+		Location:        location,
+		TemplateRepoUrl: templateRepoUrl,
+		Log:             Log.Slog(),
 	})
 	if err != nil {
 		return err
@@ -76,7 +79,6 @@ func runBootstrap(cmd *cobra.Command, _ []string) error {
 	log.Info(fmt.Sprintf("state storage: %s/%s",
 		result.StateStorage.ResourceGroupName,
 		result.StateStorage.StorageAccountName))
-	log.Info(fmt.Sprintf("identities: %d MI(s) provisioned", len(result.Identities)))
 	if result.CommitMessage != "" {
 		log.Info("initial commit created")
 	}

@@ -3,109 +3,118 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
 // PlatformConfig holds the parameters needed to provision a Git platform
-// (GitHub or Azure DevOps).
+// (GitHub or Azure DevOps) via the az-bootstrap PowerShell module.
 type PlatformConfig struct {
 	// Platform is "github" or "ado".
 	Platform string
 	// Org is the GitHub organisation or ADO organisation name.
 	Org string
-	// RepoName is the repository to create or use.
+	// RepoName is the repository to create.
 	RepoName string
+	// TemplateRepoUrl is the GitHub template to clone (optional).
+	// Defaults to kewalaka/terraform-azure-starter-template when empty.
+	TemplateRepoUrl string
 	// Environments is the list of deployment tiers (prod, staging, dev).
 	Environments []string
-	// Identities maps "<env>/<role>" → MI client ID, set by ProvisionIdentities.
-	Identities map[string]string
-	// StateStorage is the provisioned state backend config.
+	// Location is the Azure region for Managed Identity resources.
+	Location string
+	// StateStorage is the provisioned state backend config (names are passed to az-bootstrap).
 	StateStorage StateStorageConfig
-	// SubscriptionID is the target Azure subscription.
-	SubscriptionID string
-	// TenantID is the Azure AD tenant.
-	TenantID string
 }
 
-// ProvisionPlatform delegates to az-bootstrap to create the repository,
-// configure CI/CD environments, and set pipeline variables.
-// It dispatches to the correct az-bootstrap subcommand based on Platform.
+// defaultTemplateRepoUrl is the az-bootstrap template used when none is specified.
+const defaultTemplateRepoUrl = "kewalaka/terraform-azure-starter-template"
+
+// ProvisionPlatform delegates to the az-bootstrap PowerShell module to create
+// the repository, configure CI/CD environments, and provision Managed Identities
+// with OIDC federated credentials.
+//
+// Returns the path of the cloned repository so callers can commit files into it.
 func ProvisionPlatform(
 	ctx context.Context,
 	runner Runner,
 	cfg PlatformConfig,
 	logLine func(string),
-) error {
+) (string, error) {
 	switch cfg.Platform {
 	case "github":
 		return provisionGitHub(ctx, runner, cfg, logLine)
 	case "ado":
-		return provisionADO(ctx, runner, cfg, logLine)
+		return "", fmt.Errorf("ado platform is not yet supported by the az-bootstrap module; use github")
 	default:
-		return fmt.Errorf("unsupported platform %q: must be github or ado", cfg.Platform)
+		return "", fmt.Errorf("unsupported platform %q: must be github or ado", cfg.Platform)
 	}
 }
 
-// provisionGitHub calls az-bootstrap github with the full set of flags:
-//   - repo creation
-//   - environment protection rules (required reviewers on apply environments)
-//   - repository variables: ARM_CLIENT_ID, AZURE_SUBSCRIPTION_ID, TF_STATE_*
-func provisionGitHub(ctx context.Context, runner Runner, cfg PlatformConfig, logLine func(string)) error {
-	args := []string{
-		"github",
-		"--org", cfg.Org,
-		"--repo", cfg.RepoName,
-		"--subscription-id", cfg.SubscriptionID,
-		"--tenant-id", cfg.TenantID,
-		"--state-resource-group", cfg.StateStorage.ResourceGroupName,
-		"--state-storage-account", cfg.StateStorage.StorageAccountName,
-		"--state-container", cfg.StateStorage.ContainerName,
+// provisionGitHub calls Invoke-AzBootstrap for the first environment then
+// Add-AzBootstrapEnvironment for each additional environment.
+//
+// The repo is cloned to /tmp/azlift-bootstrap/<repoName>. That path is returned
+// so the caller can commit the generated Terraform into the correct location.
+// Each Add-AzBootstrapEnvironment call runs with Set-Location pointing at the
+// clone so that gh CLI picks up the correct git remote.
+func provisionGitHub(ctx context.Context, runner Runner, cfg PlatformConfig, logLine func(string)) (string, error) {
+	if len(cfg.Environments) == 0 {
+		return "", fmt.Errorf("at least one environment is required")
 	}
 
-	for _, env := range cfg.Environments {
-		args = append(args, "--environment", env)
-		if id, ok := cfg.Identities[env+"/plan"]; ok {
-			args = append(args, fmt.Sprintf("--plan-client-id-%s=%s", env, id))
-		}
-		if id, ok := cfg.Identities[env+"/apply"]; ok {
-			args = append(args, fmt.Sprintf("--apply-client-id-%s=%s", env, id))
-		}
+	firstEnv := cfg.Environments[0]
+
+	templateURL := cfg.TemplateRepoUrl
+	if templateURL == "" {
+		templateURL = defaultTemplateRepoUrl
+	}
+
+	// Clone to a deterministic temp path so we know where to cd for Add calls.
+	targetDir := filepath.Join(os.TempDir(), "azlift-bootstrap", cfg.RepoName)
+
+	// Note: -GitHubOwner is intentionally omitted — the installed az-bootstrap
+	// version translates it to `gh repo create --owner <org>` which is not a
+	// valid gh CLI flag. The module falls back to the authenticated gh user
+	// (from `gh auth status`) for owner resolution.
+	args := []string{
+		"Invoke-AzBootstrap",
+		"-TemplateRepoUrl", templateURL,
+		"-TargetRepoName", cfg.RepoName,
+		"-TargetDirectory", targetDir,
+		"-Location", cfg.Location,
+		"-InitialEnvironmentName", firstEnv,
+		"-ResourceGroupName", cfg.StateStorage.ResourceGroupName,
+		"-PlanManagedIdentityName", MIName(cfg.RepoName, firstEnv, "plan"),
+		"-ApplyManagedIdentityName", MIName(cfg.RepoName, firstEnv, "apply"),
+		"-TerraformStateStorageAccountName", cfg.StateStorage.StorageAccountName,
+		"-Confirm:$false", // SupportsShouldProcess
 	}
 
 	if err := runner.Run(ctx, args, logLine); err != nil {
-		return fmt.Errorf("provisioning GitHub platform: %w", err)
-	}
-	return nil
-}
-
-// provisionADO calls az-bootstrap ado with the full set of flags:
-//   - project + repo creation
-//   - pipeline import from YAML templates
-//   - variable groups with MI client IDs and state backend
-//   - environment approval gates on apply environments
-func provisionADO(ctx context.Context, runner Runner, cfg PlatformConfig, logLine func(string)) error {
-	args := []string{
-		"ado",
-		"--org", cfg.Org,
-		"--repo", cfg.RepoName,
-		"--subscription-id", cfg.SubscriptionID,
-		"--tenant-id", cfg.TenantID,
-		"--state-resource-group", cfg.StateStorage.ResourceGroupName,
-		"--state-storage-account", cfg.StateStorage.StorageAccountName,
-		"--state-container", cfg.StateStorage.ContainerName,
+		return "", fmt.Errorf("Invoke-AzBootstrap: %w", err)
 	}
 
-	for _, env := range cfg.Environments {
-		args = append(args, "--environment", env)
-		if id, ok := cfg.Identities[env+"/plan"]; ok {
-			args = append(args, fmt.Sprintf("--plan-client-id-%s=%s", env, id))
+	// Add subsequent environments, each running from inside the cloned repo so
+	// gh picks up the correct remote (not the caller's working directory).
+	safeDir := strings.ReplaceAll(targetDir, "'", "''")
+	for _, env := range cfg.Environments[1:] {
+		addArgs := []string{
+			"Set-Location '" + safeDir + "'; Add-AzBootstrapEnvironment",
+			"-EnvironmentName", env,
+			"-ResourceGroupName", cfg.StateStorage.ResourceGroupName,
+			"-Location", cfg.Location,
+			"-PlanManagedIdentityName", MIName(cfg.RepoName, env, "plan"),
+			"-ApplyManagedIdentityName", MIName(cfg.RepoName, env, "apply"),
+			"-GitHubOwner", cfg.Org,
+			"-GitHubRepo", cfg.RepoName,
+			"-TerraformStateStorageAccountName", cfg.StateStorage.StorageAccountName,
 		}
-		if id, ok := cfg.Identities[env+"/apply"]; ok {
-			args = append(args, fmt.Sprintf("--apply-client-id-%s=%s", env, id))
+		if err := runner.Run(ctx, addArgs, logLine); err != nil {
+			return "", fmt.Errorf("Add-AzBootstrapEnvironment (%s): %w", env, err)
 		}
 	}
 
-	if err := runner.Run(ctx, args, logLine); err != nil {
-		return fmt.Errorf("provisioning ADO platform: %w", err)
-	}
-	return nil
+	return targetDir, nil
 }
