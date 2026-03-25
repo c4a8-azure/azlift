@@ -22,8 +22,6 @@ type Options struct {
 	SkipLifecycle bool
 	// SkipSecurity disables security anti-pattern scanning.
 	SkipSecurity bool
-	// SkipTags disables tag policy normalisation.
-	SkipTags bool
 	// SkipDescriptions disables AI description generation.
 	SkipDescriptions bool
 	// Log is an optional structured logger for progress output.
@@ -36,8 +34,6 @@ type RunResult struct {
 	LifecycleInjected int
 	// SecurityFindings is the list of detected anti-patterns.
 	SecurityFindings []SecurityFinding
-	// TagsNormalised is the number of resource blocks whose tags were updated.
-	TagsNormalised int
 	// DescriptionsEnriched is the number of files enriched with AI descriptions.
 	DescriptionsEnriched int
 }
@@ -76,12 +72,8 @@ func Run(ctx context.Context, files []*refine.ParsedFile, localsFile *refine.Par
 		}
 	}
 
-	// 3. Tag normalisation (deterministic, no API).
-	if !opts.SkipTags && localsFile != nil {
-		log.Debug("enrich: normalising tag policy")
-		result.TagsNormalised = NormaliseTags(files, localsFile)
-		log.Info(fmt.Sprintf("enrich: tags — %d resource(s) normalised to merge(local.common_tags, {...})", result.TagsNormalised))
-	}
+	// 3. Tag normalisation is handled by refine.Run() so it always applies
+	// regardless of whether --enrich is set. Nothing to do here.
 
 	// 4. AI description generation (requires API key).
 	if !opts.SkipDescriptions {

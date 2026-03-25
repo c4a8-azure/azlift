@@ -46,11 +46,12 @@ type Result struct {
 //
 //  1. Parse all .tf files in InputDir.
 //  2. Extract repeated literals into variables.tf / locals.tf.
-//  3. Group resource blocks into topic files.
-//  4. Generate backend.tf, terraform.tf, providers.tf.
-//  5. Write all files to OutputDir.
-//  6. Run tflint (unless SkipLint).
-//  7. Run terraform-docs (unless SkipDocs).
+//  3. Normalise tags — inject common_tags local and rewrite resource tags to merge().
+//  4. Group resource blocks into topic files.
+//  5. Generate backend.tf, terraform.tf, providers.tf.
+//  6. Write all files to OutputDir.
+//  7. Run tflint (unless SkipLint).
+//  8. Run terraform-docs (unless SkipDocs).
 func Run(ctx context.Context, opts Options) (Result, error) {
 	var result Result
 
@@ -77,7 +78,11 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return result, fmt.Errorf("extracting variables: %w", err)
 	}
 
-	// 3. Group resource blocks into topic files.
+	// 3. Tag normalisation — always runs so every resource gets
+	// merge(local.common_tags, {...}) regardless of whether --enrich is used.
+	NormaliseTags(files, localsFile)
+
+	// 4. Group resource blocks into topic files.
 	grouped := GroupResources(files, opts.OutputDir)
 
 	// 4. Scaffold files.
