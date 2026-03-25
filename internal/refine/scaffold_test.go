@@ -64,7 +64,7 @@ func TestGenerateVersions_DefaultPins(t *testing.T) {
 		"~> 2.0",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("versions.tf missing %q\nfull output:\n%s", want, out)
+			t.Errorf("terraform.tf missing %q\nfull output:\n%s", want, out)
 		}
 	}
 }

@@ -62,7 +62,7 @@ var DefaultProviderPins = []ProviderPin{
 	{Source: "azure/azapi", Version: "~> 2.0"},
 }
 
-// GenerateVersions writes versions.tf into outputDir with a terraform block
+// GenerateVersions writes terraform.tf into outputDir with a terraform block
 // containing required_version and required_providers.
 func GenerateVersions(outputDir string, minTerraformVersion string, pins []ProviderPin) (*ParsedFile, error) {
 	if minTerraformVersion == "" {
@@ -72,7 +72,7 @@ func GenerateVersions(outputDir string, minTerraformVersion string, pins []Provi
 		pins = DefaultProviderPins
 	}
 
-	pf := NewFile(filepath.Join(outputDir, "versions.tf"))
+	pf := NewFile(filepath.Join(outputDir, "terraform.tf"))
 	body := pf.File.Body()
 
 	tfBlock := body.AppendNewBlock("terraform", nil)

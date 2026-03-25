@@ -42,7 +42,7 @@ type Result struct {
 //  1. Parse all .tf files in InputDir.
 //  2. Extract repeated literals into variables.tf / locals.tf.
 //  3. Group resource blocks into topic files.
-//  4. Generate backend.tf, versions.tf, providers.tf.
+//  4. Generate backend.tf, terraform.tf, providers.tf.
 //  5. Write all files to OutputDir.
 //  6. Run tflint (unless SkipLint).
 //  7. Run terraform-docs (unless SkipDocs).
@@ -77,7 +77,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 
 	versionsFile, err := GenerateVersions(opts.OutputDir, "", nil)
 	if err != nil {
-		return result, fmt.Errorf("generating versions.tf: %w", err)
+		return result, fmt.Errorf("generating terraform.tf: %w", err)
 	}
 
 	providersFile, err := GenerateProvider(opts.OutputDir)
