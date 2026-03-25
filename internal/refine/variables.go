@@ -110,8 +110,6 @@ func ExtractVariables(files []*ParsedFile, outputDir string) (varsFile, localsFi
 
 func appendVariableBlock(body *hclwrite.Body, name, defaultVal string) {
 	block := body.AppendNewBlock("variable", []string{name})
-	block.Body().SetAttributeRaw("description",
-		hclwrite.TokensForValue(cty.StringVal(fmt.Sprintf("Azure %s for all resources.", strings.ReplaceAll(name, "_", " ")))))
 	block.Body().SetAttributeRaw("type", hclwrite.TokensForIdentifier("string"))
 	block.Body().SetAttributeValue("default", cty.StringVal(defaultVal))
 	body.AppendNewline()
