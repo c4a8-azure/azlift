@@ -3,9 +3,11 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/c4a8-azure/azlift/internal/refine"
 	"github.com/c4a8-azure/azlift/internal/run"
 )
 
@@ -58,6 +60,9 @@ Example (cross-tenant):
 	cmd.Flags().String("org", "", "GitHub organisation")
 	cmd.Flags().String("mi-resource-group", "", "RG for Managed Identities (defaults to --resource-group)")
 
+	// ── Tags ──────────────────────────────────────────────────────────────────
+	cmd.Flags().StringSlice("tag-keys", nil, "Tag keys to inject into local.common_tags on every resource (default: "+strings.Join(refine.StandardTagKeys, ",")+") ")
+
 	// ── Output ────────────────────────────────────────────────────────────────
 	cmd.Flags().String("mode", "modules", "Output mode: modules or terragrunt")
 	cmd.Flags().StringSlice("environments", []string{"prod", "dev"}, "Deployment environments (comma-separated)")
@@ -98,6 +103,7 @@ func runPipeline(cmd *cobra.Command, _ []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	skipLint, _ := cmd.Flags().GetBool("skip-lint")
 	skipDocs, _ := cmd.Flags().GetBool("skip-docs")
+	tagKeys, _ := cmd.Flags().GetStringSlice("tag-keys")
 
 	sub, _ := cmd.Root().PersistentFlags().GetString("subscription")
 	if sub == "" {
@@ -130,6 +136,7 @@ func runPipeline(cmd *cobra.Command, _ []string) error {
 		Location:           location,
 		WorkDir:            workDir,
 		WorkflowsDir:       workflowsDir,
+		CommonTagKeys:      tagKeys,
 		Enrich:             doEnrich,
 		FixSecurity:        fixSecurity,
 		DryRun:             dryRun,

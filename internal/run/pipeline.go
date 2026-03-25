@@ -52,6 +52,11 @@ type Options struct {
 	WorkDir      string
 	WorkflowsDir string
 
+	// ─── Tags ────────────────────────────────────────────────────────────────
+	// CommonTagKeys overrides the default tag keys in local.common_tags.
+	// Defaults to refine.StandardTagKeys when nil.
+	CommonTagKeys []string
+
 	// ─── Enrichment ──────────────────────────────────────────────────────────
 	Enrich      bool
 	FixSecurity bool
@@ -155,6 +160,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		InputDir:      rgDir,
 		OutputDir:     refinedDir,
 		ResourceGroup: opts.ResourceGroup,
+		CommonTagKeys: opts.CommonTagKeys,
 		SkipLint:      opts.SkipLint || opts.Mode == "terragrunt",
 		SkipDocs:      opts.SkipDocs,
 	})

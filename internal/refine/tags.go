@@ -85,15 +85,22 @@ const CommonTagsLocalName = "common_tags"
 // NormaliseTags performs two operations:
 //
 //  1. Injects a `common_tags` entry into the `locals {}` block of the
-//     locals file, containing the standard tag keys with empty-string defaults
+//     locals file, containing the tag keys with empty-string defaults
 //     (the caller / environment will supply real values).
 //  2. Rewrites every `tags = { ... }` attribute on resource blocks to use
 //     `merge(local.common_tags, { <bespoke> })`, preserving any tags that
 //     are not part of the standard set.
 //
+// The optional tagKeys parameter overrides StandardTagKeys. When empty,
+// StandardTagKeys is used unchanged.
+//
 // Returns the count of resource blocks whose tags were normalised.
-func NormaliseTags(files []*ParsedFile, localsFile *ParsedFile) int {
-	injectCommonTagsLocal(localsFile)
+func NormaliseTags(files []*ParsedFile, localsFile *ParsedFile, tagKeys ...string) int {
+	keys := StandardTagKeys
+	if len(tagKeys) > 0 {
+		keys = tagKeys
+	}
+	injectCommonTagsLocal(localsFile, keys)
 
 	normalised := 0
 	for _, pf := range files {
@@ -111,8 +118,8 @@ func NormaliseTags(files []*ParsedFile, localsFile *ParsedFile) int {
 }
 
 // injectCommonTagsLocal adds (or overwrites) the common_tags attribute in
-// the first locals {} block of localsFile.
-func injectCommonTagsLocal(pf *ParsedFile) {
+// the first locals {} block of localsFile using the provided tag keys.
+func injectCommonTagsLocal(pf *ParsedFile, keys []string) {
 	var localsBlock *hclwrite.Block
 	for _, b := range pf.File.Body().Blocks() {
 		if b.Type() == "locals" {
@@ -124,16 +131,16 @@ func injectCommonTagsLocal(pf *ParsedFile) {
 		localsBlock = pf.File.Body().AppendNewBlock("locals", nil)
 	}
 
-	localsBlock.Body().SetAttributeRaw(CommonTagsLocalName, hclwrite.TokensForIdentifier(buildCommonTagsObject()))
+	localsBlock.Body().SetAttributeRaw(CommonTagsLocalName, hclwrite.TokensForIdentifier(buildCommonTagsObject(keys)))
 }
 
-func buildCommonTagsObject() string {
+func buildCommonTagsObject(keys []string) string {
+	sorted := make([]string, len(keys))
+	copy(sorted, keys)
+	sort.Strings(sorted)
 	var sb strings.Builder
 	sb.WriteString("{\n")
-	keys := make([]string, len(StandardTagKeys))
-	copy(keys, StandardTagKeys)
-	sort.Strings(keys)
-	for _, k := range keys {
+	for _, k := range sorted {
 		fmt.Fprintf(&sb, "    %s = \"\"\n", k)
 	}
 	sb.WriteString("  }")

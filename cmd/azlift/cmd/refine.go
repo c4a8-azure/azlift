@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -35,6 +36,7 @@ auto-remediations to the output files.`,
 	cmd.Flags().String("mode", "modules", "Output mode: modules or terragrunt")
 	cmd.Flags().String("resource-group", "", "Resource group name (used for backend state key)")
 	cmd.Flags().String("terraform-version", "", "Minimum Terraform version constraint injected when the input omits required_version (default: \""+refine.DefaultMinTerraformVersion+"\")")
+	cmd.Flags().StringSlice("tag-keys", nil, "Tag keys to inject into local.common_tags on every resource (default: "+strings.Join(refine.StandardTagKeys, ",")+")")
 	cmd.Flags().Bool("enrich", false, "Run full enrichment pass (lifecycle, security, tags, AI descriptions)")
 	cmd.Flags().Bool("fix-security", false, "Auto-remediate safe security anti-patterns in the output")
 	cmd.Flags().Bool("skip-lint", false, "Skip the tflint pass")
@@ -49,6 +51,7 @@ func runRefine(cmd *cobra.Command, _ []string) error {
 	mode, _ := cmd.Flags().GetString("mode")
 	rg, _ := cmd.Flags().GetString("resource-group")
 	tfVersion, _ := cmd.Flags().GetString("terraform-version")
+	tagKeys, _ := cmd.Flags().GetStringSlice("tag-keys")
 	doEnrich, _ := cmd.Flags().GetBool("enrich")
 	fixSecurity, _ := cmd.Flags().GetBool("fix-security")
 	skipLint, _ := cmd.Flags().GetBool("skip-lint")
@@ -68,6 +71,7 @@ func runRefine(cmd *cobra.Command, _ []string) error {
 		OutputDir:           outputDir,
 		ResourceGroup:       rg,
 		MinTerraformVersion: tfVersion,
+		CommonTagKeys:       tagKeys,
 		SkipLint:            skipLint || mode == "terragrunt",
 		SkipDocs:            skipDocs,
 	})
