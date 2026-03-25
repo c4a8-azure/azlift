@@ -21,12 +21,13 @@ func writeTF(t *testing.T, dir, name, content string) {
 
 // minimalRefinedModule returns a temporary directory with the minimal set of
 // files that the refine stage would produce for a single-RG workload.
+// resource_group_name is already a variable (alwaysVariable), so it appears
+// in variables.tf and resources reference var.resource_group_name directly.
 func minimalRefinedModule(t *testing.T) (dir string, files []*refine.ParsedFile) {
 	t.Helper()
 	dir = t.TempDir()
 
 	writeTF(t, dir, "locals.tf", `locals {
-  resource_group_name = "rg-myapp-prod"
   common_tags = {
     environment = ""
     owner       = ""
@@ -37,6 +38,11 @@ func minimalRefinedModule(t *testing.T) (dir string, files []*refine.ParsedFile)
   description = "Azure region."
   type        = string
   default     = "westeurope"
+}
+
+variable "resource_group_name" {
+  type    = string
+  default = "rg-myapp-prod"
 }
 `)
 	writeTF(t, dir, "terraform.tf", `terraform {
@@ -52,7 +58,7 @@ func minimalRefinedModule(t *testing.T) (dir string, files []*refine.ParsedFile)
 	writeTF(t, dir, "resources.networking.tf", `resource "azurerm_virtual_network" "vnet" {
   name                = "vnet-prod"
   location            = var.location
-  resource_group_name = local.resource_group_name
+  resource_group_name = var.resource_group_name
   tags                = merge(local.common_tags, {})
 }
 `)
@@ -168,7 +174,7 @@ func TestRun_ModuleVariablesHasEnvironment(t *testing.T) {
 	}
 }
 
-func TestRun_ModuleLocalsRemovesRGName(t *testing.T) {
+func TestRun_ModuleLocalsHasNoRGName(t *testing.T) {
 	_, files := minimalRefinedModule(t)
 	outDir := t.TempDir()
 
@@ -183,9 +189,9 @@ func TestRun_ModuleLocalsRemovesRGName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading locals.tf: %v", err)
 	}
-	content := string(raw)
-	if strings.Contains(content, `resource_group_name = "rg-myapp-prod"`) {
-		t.Error("module/locals.tf should not contain resource_group_name literal")
+	// resource_group_name lives in variables.tf, never in locals.tf.
+	if strings.Contains(string(raw), "resource_group_name") {
+		t.Error("module/locals.tf should not contain resource_group_name (it's a variable)")
 	}
 }
 
@@ -225,8 +231,9 @@ func TestRun_ResourceFileUsesVarRG(t *testing.T) {
 		t.Fatalf("reading resources.networking.tf: %v", err)
 	}
 	content := string(raw)
+	// refine stage already writes var.resource_group_name; module/ must preserve it.
 	if strings.Contains(content, "local.resource_group_name") {
-		t.Error("resource file should not reference local.resource_group_name")
+		t.Error("resource file must not reference local.resource_group_name")
 	}
 	if !strings.Contains(content, "var.resource_group_name") {
 		t.Error("resource file should reference var.resource_group_name")

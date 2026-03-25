@@ -16,16 +16,17 @@ const extractThreshold = 3 // extract literals appearing in 3+ resource blocks
 type attrVal struct{ attr, val string }
 
 // alwaysVariable are attribute names always extracted as input variables
-// (user-facing, documented, overridable per environment).
+// (user-facing, overridable per environment). Each distinct value gets its
+// own numbered variable when multiple values are present (e.g.
+// resource_group_name_001, resource_group_name_002).
 var alwaysVariable = map[string]bool{
-	"location": true,
+	"location":            true,
+	"resource_group_name": true,
 }
 
 // alwaysLocal are attribute names always extracted as locals
-// (internal, derived, not expected to be overridden directly).
-var alwaysLocal = map[string]bool{
-	"resource_group_name": true,
-}
+// (internal, not expected to be overridden directly).
+var alwaysLocal = map[string]bool{}
 
 // ExtractVariables scans all resource blocks across files for repeated string
 // literals, extracts them into variables.tf and locals.tf, and rewrites the

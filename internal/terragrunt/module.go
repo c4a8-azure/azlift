@@ -13,8 +13,8 @@ import (
 // moduleResult carries data extracted while building the module/ directory,
 // used by the root.hcl and env stack generators.
 type moduleResult struct {
-	// RGLocals maps local name → original RG value extracted from the source
-	// locals.tf (e.g. "resource_group_name" → "rg-myapp-prod").
+	// RGLocals maps variable name → default RG value extracted from variables.tf
+	// (e.g. "resource_group_name" → "rg-myapp-prod").
 	RGLocals map[string]string
 	// Location is the Azure location default from variables.tf.
 	Location string
@@ -27,41 +27,40 @@ var skipInModule = map[string]bool{
 	"providers.tf": true,
 }
 
-// rgLocalNameRe matches resource_group_name and resource_group_name_NNN locals.
-var rgLocalNameRe = regexp.MustCompile(`^resource_group_name(_\d+)?$`)
+// rgVarNameRe matches variable names resource_group_name and resource_group_name_NNN.
+var rgVarNameRe = regexp.MustCompile(`^resource_group_name(_\d+)?$`)
 
-// rgLocalLineRe matches a resource_group_name* = "..." line in a locals block.
-var rgLocalLineRe = regexp.MustCompile(`(?m)^[ \t]*resource_group_name(_\d+)?\s*=\s*"[^"]*"[ \t]*\n?`)
-
-// rgLocalRefRe matches local.resource_group_name and local.resource_group_name_NNN.
-var rgLocalRefRe = regexp.MustCompile(`\blocal\.(resource_group_name(?:_\d+)?)\b`)
-
-// writeModule copies the refined module files into moduleDir, promoting
-// resource_group_name from a local to an input variable and adding the
-// environment variable. Returns extracted values needed by the env stacks.
+// writeModule copies the refined module files into moduleDir, adding the
+// environment input variable and wiring common_tags to use it.
+// Returns extracted default values needed by the env stack generators.
+//
+// The refine stage already promotes resource_group_name to a variable block
+// (alwaysVariable) and rewrites resource references to var.resource_group_name,
+// so no local→var promotion is needed here.
 func writeModule(files []*refine.ParsedFile, moduleDir string) (moduleResult, error) {
 	result := moduleResult{RGLocals: map[string]string{}}
 
-	// Pass 1 — collect RG local values and location from the in-memory ASTs.
+	// Pass 1 — collect RG default values and location from variables.tf.
 	for _, pf := range files {
-		switch filepath.Base(pf.Path) {
-		case "locals.tf":
-			for _, block := range refine.Blocks(pf, "locals") {
-				for name, attr := range block.Body().Attributes() {
-					if rgLocalNameRe.MatchString(name) {
-						val := strings.TrimSpace(string(attr.Expr().BuildTokens(nil).Bytes()))
-						result.RGLocals[name] = strings.Trim(val, `"`)
-					}
-				}
+		if filepath.Base(pf.Path) != "variables.tf" {
+			continue
+		}
+		for _, block := range refine.Blocks(pf, "variable") {
+			if len(block.Labels()) == 0 {
+				continue
 			}
-		case "variables.tf":
-			for _, block := range refine.Blocks(pf, "variable") {
-				if len(block.Labels()) > 0 && block.Labels()[0] == "location" {
-					if attr := block.Body().GetAttribute("default"); attr != nil {
-						val := strings.TrimSpace(string(attr.Expr().BuildTokens(nil).Bytes()))
-						result.Location = strings.Trim(val, `"`)
-					}
-				}
+			name := block.Labels()[0]
+			def := block.Body().GetAttribute("default")
+			if def == nil {
+				continue
+			}
+			val := strings.Trim(strings.TrimSpace(string(def.Expr().BuildTokens(nil).Bytes())), `"`)
+
+			switch {
+			case rgVarNameRe.MatchString(name):
+				result.RGLocals[name] = val
+			case name == "location":
+				result.Location = val
 			}
 		}
 	}
@@ -81,16 +80,14 @@ func writeModule(files []*refine.ParsedFile, moduleDir string) (moduleResult, er
 
 		switch base {
 		case "locals.tf":
-			// Remove resource_group_name locals (promoted to variables).
-			content = rgLocalLineRe.ReplaceAllString(content, "")
-			// Wire environment tag to var.environment.
+			// Wire the environment tag in common_tags to var.environment.
 			content = patchCommonTagsEnvironment(content)
 		case "variables.tf":
-			content = addModuleVariables(content, result.RGLocals)
-		default:
-			// Rewrite local.resource_group_name* → var.resource_group_name*.
-			content = rgLocalRefRe.ReplaceAllString(content, `var.$1`)
+			// Add variable "environment" so each env stack can pass a value.
+			content = addEnvironmentVariable(content)
 		}
+		// Resource files need no transformation: the refine stage already
+		// wrote var.resource_group_name (alwaysVariable) into every resource block.
 
 		dest := filepath.Join(moduleDir, base)
 		if err := os.WriteFile(dest, []byte(content), 0o600); err != nil {
@@ -109,31 +106,16 @@ func patchCommonTagsEnvironment(content string) string {
 	return strings.ReplaceAll(content, `environment = ""`, `environment = var.environment`)
 }
 
-// addModuleVariables appends variable declarations for environment and each
-// resource_group_name* local that was promoted to a variable.
-func addModuleVariables(content string, rgLocals map[string]string) string {
-	var sb strings.Builder
-	sb.WriteString(content)
-
-	if !strings.Contains(content, `variable "environment"`) {
-		sb.WriteString(`
+// addEnvironmentVariable appends a variable "environment" block to the content
+// of variables.tf if one is not already present.
+func addEnvironmentVariable(content string) string {
+	if strings.Contains(content, `variable "environment"`) {
+		return content
+	}
+	return content + `
 variable "environment" {
   description = "Deployment environment (e.g. prod, dev, staging)."
   type        = string
 }
-`)
-	}
-
-	for _, name := range sortedKeys(rgLocals) {
-		if !strings.Contains(content, fmt.Sprintf(`variable "%s"`, name)) {
-			sb.WriteString(fmt.Sprintf(`
-variable "%s" {
-  description = "Azure resource group name."
-  type        = string
-}
-`, name))
-		}
-	}
-
-	return sb.String()
+`
 }
