@@ -2,7 +2,7 @@
 
 > Turn "what was clicked" into clean, auditable, pipeline-driven infrastructure — without starting from scratch.
 
-A wrapper tool that orchestrates [aztfexport](https://github.com/Azure/aztfexport) and [az-bootstrap](https://github.com/kewalaka/az-bootstrap) into a single, opinionated pipeline that converts portal-created Azure resources into production-ready Terraform or Terragrunt code, fully wired into a Git-based CI/CD setup.
+A wrapper tool that orchestrates [aztfexport](https://github.com/Azure/aztfexport) into a single, opinionated pipeline that converts portal-created Azure resources into production-ready Terraform or Terragrunt code, fully wired into a Git-based CI/CD setup. The bootstrap stage provisions state storage, Managed Identities, OIDC, and GitHub pipelines natively — no PowerShell modules required.
 
 ---
 
@@ -34,8 +34,8 @@ Ignoring it is not an option. Every resource provisioned outside of code is a re
 │  ┌─────────┐   ┌──────────┐   ┌───────────┐   ┌─────────────────┐ │
 │  │  SCAN   │──▶│  EXPORT  │──▶│  REFINE   │──▶│    BOOTSTRAP    │ │
 │  └─────────┘   └──────────┘   └───────────┘   └─────────────────┘ │
-│  Azure Graph   aztfexport      Transform        az-bootstrap        │
-│  API           (wrapped)       Engine           (wrapped)           │
+│  Azure Graph   aztfexport      Transform        Native Go +         │
+│  API           (wrapped)       Engine           gh CLI              │
 └─────────────────────────────────────────────────────────────────────┘
          ↓              ↓               ↓                  ↓
     Resource      raw .tf +        structured          Git repo +
@@ -204,15 +204,18 @@ This maps directly to the "automated fine-tuning and best-practice alignment" go
 
 ### Stage 4 — BOOTSTRAP
 
-The tool wraps az-bootstrap to initialize the Git repository and CI/CD plumbing around the generated Terraform:
+The native Go bootstrap pipeline wires everything together without any external PowerShell modules:
 
-1. Creates an Azure Resource Group for state storage and managed identities
-2. Provisions two Managed Identities: one for `plan` (Reader), one for `apply` (Contributor)
-3. Configures OIDC federated credentials — no stored secrets, no service principal passwords
-4. Creates the GitHub or Azure DevOps repository from a pipeline-ready template
-5. Sets up environments (`dev-iac-plan`, `dev-iac-apply`, etc.) with appropriate reviewers
-6. Commits the generated Terraform into the new repository
-7. Configures pipeline variables pointing to the correct state backend
+1. Creates an Azure Resource Group for state storage and Managed Identities
+2. Provisions state storage (Standard_LRS, TLS 1.2, HTTPS only, blob public access disabled)
+3. Provisions two Managed Identities per environment: one for `plan` (Reader), one for `apply` (Contributor)
+4. Configures OIDC federated credentials — no stored secrets, no service principal passwords
+5. Initialises a local Git repository with the refined Terraform, GitHub Actions workflows, and a `bootstrap/` Terraform module
+6. Creates the GitHub repository via `gh` CLI and pushes
+7. Configures GitHub environments (`dev-iac-plan`, `dev-iac-apply`, etc.) with `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID` variables
+8. Uploads the aztfexport `terraform.tfstate` to the remote state container
+
+**Cross-tenant mode**: when `--target-tenant` differs from the source tenant, Azure provisioning is skipped. A `bootstrap/` Terraform module is generated for the operator to apply manually in the target tenant instead.
 
 The result: `terraform plan` works on the first pipeline run.
 
@@ -249,12 +252,12 @@ azlift refine \
   --mode modules          # or: terragrunt
   --enrich                # optional: AI enrichment pass
 
-# 4. Bootstrap the Git repo and CI/CD (wraps az-bootstrap)
+# 4. Bootstrap the Git repo and CI/CD
 azlift bootstrap \
   --input-dir ./refined \
   --repo-name infra-prod-network \
-  --environments dev,staging,prod \
-  --platform github       # or: ado
+  --org my-github-org \
+  --environments dev,staging,prod
 ```
 
 ### Emergency / Incident Mode
@@ -293,7 +296,7 @@ infra-prod-network/
 ├── keyvault.tf
 ├── outputs.tf
 ├── terraform.tfvars.example
-└── .azbootstrap.jsonc          # tracks bootstrapped Azure resources
+└── bootstrap/                  # Terraform module to activate CI/CD (cross-tenant or manual use)
 ```
 
 ### Terragrunt Mode
@@ -344,7 +347,7 @@ The `--enrich` flag enables AI-assisted refinement. It is not required for the p
 
 ### No Stored Secrets
 
-The bootstrap stage uses OIDC federated credentials on Managed Identities — the same approach as az-bootstrap. There are no service principal passwords, no client secrets stored in pipeline variables, and no long-lived credentials of any kind.
+The bootstrap stage uses OIDC federated credentials on Managed Identities. There are no service principal passwords, no client secrets stored in pipeline variables, and no long-lived credentials of any kind.
 
 ---
 
@@ -353,7 +356,6 @@ The bootstrap stage uses OIDC federated credentials on Managed Identities — th
 - Azure CLI (`az`) logged in
 - GitHub CLI (`gh`) logged in (for GitHub platform)
 - `aztfexport` installed
-- PowerShell 7 (for az-bootstrap)
 - Go 1.22+
 
 ---
@@ -363,12 +365,13 @@ The bootstrap stage uses OIDC federated credentials on Managed Identities — th
 | Tool | Role |
 |---|---|
 | [aztfexport](https://github.com/Azure/aztfexport) | Core export engine — introspects Azure and generates raw Terraform + state |
-| [az-bootstrap](https://github.com/kewalaka/az-bootstrap) | CI/CD bootstrap — provisions Managed Identities, OIDC, and Git repository |
+| Azure SDK for Go | Native bootstrap — provisions state storage, Managed Identities, OIDC, and RBAC |
+| GitHub CLI (`gh`) | Repo creation, environment configuration, and variable management |
 | [tflint](https://github.com/terraform-linters/tflint) | Linting pass applied after refine stage |
 | [terraform-docs](https://github.com/terraform-docs/terraform-docs) | Documentation generation for module outputs |
 | [Terragrunt](https://terragrunt.gruntwork.io/) | Optional DRY wrapper for multi-environment configurations |
 
-`azlift` does not replace any of these tools. It orchestrates them into a single pipeline and fills the gaps between them.
+`azlift` orchestrates these tools into a single pipeline and fills the gaps between them.
 
 ---
 
