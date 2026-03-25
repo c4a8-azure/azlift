@@ -26,7 +26,8 @@ type Config struct {
 }
 
 // Render returns a map of filename → rendered YAML content for all workflow
-// files derived from cfg. Files are named plan-{env}.yml and apply-{env}.yml.
+// files derived from cfg. Files are named plan-{env}.yml, apply-{env}.yml,
+// and drift-{env}.yml.
 func Render(cfg Config) (map[string][]byte, error) {
 	planTmpl, err := loadTemplate(cfg.CustomDir, "plan.yml.tmpl")
 	if err != nil {
@@ -36,8 +37,12 @@ func Render(cfg Config) (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading apply template: %w", err)
 	}
+	driftTmpl, err := loadTemplate(cfg.CustomDir, "drift.yml.tmpl")
+	if err != nil {
+		return nil, fmt.Errorf("loading drift template: %w", err)
+	}
 
-	files := make(map[string][]byte, len(cfg.Environments)*2)
+	files := make(map[string][]byte, len(cfg.Environments)*3)
 	for _, env := range cfg.Environments {
 		data := struct{ Environment string }{Environment: env}
 
@@ -52,6 +57,12 @@ func Render(cfg Config) (map[string][]byte, error) {
 			return nil, fmt.Errorf("rendering apply template for %s: %w", env, err)
 		}
 		files[fmt.Sprintf("apply-%s.yml", env)] = applyBytes
+
+		driftBytes, err := renderTemplate(driftTmpl, data)
+		if err != nil {
+			return nil, fmt.Errorf("rendering drift template for %s: %w", env, err)
+		}
+		files[fmt.Sprintf("drift-%s.yml", env)] = driftBytes
 	}
 
 	return files, nil

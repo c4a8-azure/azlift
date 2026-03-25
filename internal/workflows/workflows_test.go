@@ -15,9 +15,9 @@ func TestRender_ProducesFilesPerEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	// 3 envs × 2 types = 6 files
-	if len(files) != 6 {
-		t.Errorf("want 6 files, got %d: %v", len(files), keys(files))
+	// 3 envs × 3 types (plan, apply, drift) = 9 files
+	if len(files) != 9 {
+		t.Errorf("want 9 files, got %d: %v", len(files), keys(files))
 	}
 }
 
@@ -84,8 +84,8 @@ func TestWrite_CreatesWorkflowsDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading workflows dir: %v", err)
 	}
-	if len(entries) != 4 { // 2 envs × 2 types
-		t.Errorf("want 4 files, got %d", len(entries))
+	if len(entries) != 6 { // 2 envs × 3 types (plan, apply, drift)
+		t.Errorf("want 6 files, got %d", len(entries))
 	}
 }
 
@@ -94,10 +94,14 @@ func TestRender_CustomDir(t *testing.T) {
 	// Write minimal custom templates.
 	planContent := "name: custom plan {{.Environment}}\non: [push]"
 	applyContent := "name: custom apply {{.Environment}}\non: [push]"
+	driftContent := "name: custom drift {{.Environment}}\non: [schedule]"
 	if err := os.WriteFile(filepath.Join(customDir, "plan.yml.tmpl"), []byte(planContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(customDir, "apply.yml.tmpl"), []byte(applyContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(customDir, "drift.yml.tmpl"), []byte(driftContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -108,6 +112,28 @@ func TestRender_CustomDir(t *testing.T) {
 	}
 	if !strings.Contains(string(files["plan-prod.yml"]), "custom plan prod") {
 		t.Error("custom template should be used")
+	}
+}
+
+func TestRender_DriftFileContainsEnvironmentAndSchedule(t *testing.T) {
+	cfg := workflows.Config{Environments: []string{"prod"}}
+	files, err := workflows.Render(cfg)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	drift, ok := files["drift-prod.yml"]
+	if !ok {
+		t.Fatal("expected drift-prod.yml in output")
+	}
+	content := string(drift)
+	if !strings.Contains(content, "prod-iac-plan") {
+		t.Error("drift-prod.yml should reference prod-iac-plan environment")
+	}
+	if !strings.Contains(content, "schedule") {
+		t.Error("drift-prod.yml should have a schedule trigger")
+	}
+	if !strings.Contains(content, "detailed-exitcode") {
+		t.Error("drift-prod.yml should use -detailed-exitcode")
 	}
 }
 
