@@ -62,8 +62,46 @@ var DefaultProviderPins = []ProviderPin{
 	{Source: "azure/azapi", Version: "~> 2.0"},
 }
 
+// ExtractTerraformBlock finds the terraform {} block from the parsed input
+// files, strips any embedded backend {} sub-block (which lives in backend.tf),
+// and writes the result as terraform.tf in outputDir.
+// Returns nil when no terraform block is present in the input — the caller
+// should fall back to GenerateVersions in that case.
+func ExtractTerraformBlock(outputDir string, files []*ParsedFile) (*ParsedFile, error) {
+	for _, pf := range files {
+		for _, block := range pf.File.Body().Blocks() {
+			if block.Type() != "terraform" {
+				continue
+			}
+			// Re-parse a mutable clone of the block.
+			src := block.BuildTokens(nil).Bytes()
+			f, diags := hclwrite.ParseConfig(append(src, '\n'), "<terraform>", initPos)
+			if diags.HasErrors() {
+				continue
+			}
+			// Strip backend sub-block — it lives in backend.tf.
+			for _, outer := range f.Body().Blocks() {
+				if outer.Type() != "terraform" {
+					continue
+				}
+				for _, sub := range outer.Body().Blocks() {
+					if sub.Type() == "backend" {
+						outer.Body().RemoveBlock(sub)
+					}
+				}
+			}
+			out := NewFile(filepath.Join(outputDir, "terraform.tf"))
+			out.File = f
+			return out, nil
+		}
+	}
+	return nil, nil
+}
+
 // GenerateVersions writes terraform.tf into outputDir with a terraform block
-// containing required_version and required_providers.
+// containing required_version and required_providers. Used as a fallback when
+// the input files contain no terraform block (e.g. when refining without a
+// prior aztfexport run).
 func GenerateVersions(outputDir string, minTerraformVersion string, pins []ProviderPin) (*ParsedFile, error) {
 	if minTerraformVersion == "" {
 		minTerraformVersion = ">= 1.5.0"

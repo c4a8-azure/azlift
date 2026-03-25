@@ -88,9 +88,15 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return result, fmt.Errorf("generating backend.tf: %w", err)
 	}
 
-	versionsFile, err := GenerateVersions(opts.OutputDir, "", nil)
+	versionsFile, err := ExtractTerraformBlock(opts.OutputDir, files)
 	if err != nil {
-		return result, fmt.Errorf("generating terraform.tf: %w", err)
+		return result, fmt.Errorf("extracting terraform.tf: %w", err)
+	}
+	if versionsFile == nil {
+		versionsFile, err = GenerateVersions(opts.OutputDir, "", nil)
+		if err != nil {
+			return result, fmt.Errorf("generating terraform.tf: %w", err)
+		}
 	}
 
 	providersFile, err := GenerateProvider(opts.OutputDir)
