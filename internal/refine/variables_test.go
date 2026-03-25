@@ -125,6 +125,113 @@ func TestExtractVariables_EmptyFiles(t *testing.T) {
 	}
 }
 
+func TestExtractVariables_MultipleDistinctValuesGetNumberedLocals(t *testing.T) {
+	// 3 resources reference "vnet-a", 3 reference "vnet-b" → two numbered locals.
+	hcl := `
+resource "azurerm_subnet" "a1" { virtual_network_name = "vnet-a" }
+resource "azurerm_subnet" "a2" { virtual_network_name = "vnet-a" }
+resource "azurerm_subnet" "a3" { virtual_network_name = "vnet-a" }
+resource "azurerm_subnet" "b1" { virtual_network_name = "vnet-b" }
+resource "azurerm_subnet" "b2" { virtual_network_name = "vnet-b" }
+resource "azurerm_subnet" "b3" { virtual_network_name = "vnet-b" }
+`
+	tmp := t.TempDir()
+	writeTFFile(t, tmp, "main.tf", hcl)
+	files, _ := ParseDir(tmp)
+
+	_, localsFile, err := ExtractVariables(files, tmp)
+	if err != nil {
+		t.Fatalf("ExtractVariables: %v", err)
+	}
+
+	out := string(localsFile.File.Bytes())
+	if !strings.Contains(out, "virtual_network_name_001") {
+		t.Errorf("expected virtual_network_name_001 in locals.tf, got:\n%s", out)
+	}
+	if !strings.Contains(out, "virtual_network_name_002") {
+		t.Errorf("expected virtual_network_name_002 in locals.tf, got:\n%s", out)
+	}
+	// Values are sorted alphabetically: "vnet-a" → _001, "vnet-b" → _002.
+	if !strings.Contains(out, `"vnet-a"`) {
+		t.Errorf("expected vnet-a value in locals.tf, got:\n%s", out)
+	}
+	if !strings.Contains(out, `"vnet-b"`) {
+		t.Errorf("expected vnet-b value in locals.tf, got:\n%s", out)
+	}
+}
+
+func TestExtractVariables_MultipleDistinctValuesRewrittenCorrectly(t *testing.T) {
+	// Each resource must be rewritten to its own numbered local, not to the same one.
+	hcl := `
+resource "azurerm_subnet" "a1" { virtual_network_name = "vnet-a" }
+resource "azurerm_subnet" "a2" { virtual_network_name = "vnet-a" }
+resource "azurerm_subnet" "a3" { virtual_network_name = "vnet-a" }
+resource "azurerm_subnet" "b1" { virtual_network_name = "vnet-b" }
+resource "azurerm_subnet" "b2" { virtual_network_name = "vnet-b" }
+resource "azurerm_subnet" "b3" { virtual_network_name = "vnet-b" }
+`
+	tmp := t.TempDir()
+	writeTFFile(t, tmp, "main.tf", hcl)
+	files, _ := ParseDir(tmp)
+
+	if _, _, err := ExtractVariables(files, tmp); err != nil {
+		t.Fatalf("ExtractVariables: %v", err)
+	}
+
+	out := string(files[0].File.Bytes())
+	if strings.Contains(out, `"vnet-a"`) {
+		t.Errorf("literal vnet-a should have been replaced with a local ref:\n%s", out)
+	}
+	if strings.Contains(out, `"vnet-b"`) {
+		t.Errorf("literal vnet-b should have been replaced with a local ref:\n%s", out)
+	}
+	if !strings.Contains(out, "local.virtual_network_name_001") {
+		t.Errorf("expected local.virtual_network_name_001 in resource blocks:\n%s", out)
+	}
+	if !strings.Contains(out, "local.virtual_network_name_002") {
+		t.Errorf("expected local.virtual_network_name_002 in resource blocks:\n%s", out)
+	}
+}
+
+func TestExtractVariables_RewriteOnlyMatchingValue(t *testing.T) {
+	// resource_group_name appears once with "rg-a" and many times with "rg-main".
+	// Only "rg-main" meets the alwaysLocal extraction threshold (always extracted);
+	// but with two distinct values, numbered locals are generated.
+	// "rg-a" must be rewritten to its own ref, not to rg-main's ref.
+	hcl := `
+resource "azurerm_resource_group" "a"  { resource_group_name = "rg-a" }
+resource "azurerm_vnet" "v1"           { resource_group_name = "rg-main" }
+resource "azurerm_vnet" "v2"           { resource_group_name = "rg-main" }
+resource "azurerm_subnet" "s1"         { resource_group_name = "rg-main" }
+`
+	tmp := t.TempDir()
+	writeTFFile(t, tmp, "main.tf", hcl)
+	files, _ := ParseDir(tmp)
+
+	_, localsFile, err := ExtractVariables(files, tmp)
+	if err != nil {
+		t.Fatalf("ExtractVariables: %v", err)
+	}
+
+	src := string(files[0].File.Bytes())
+	locals := string(localsFile.File.Bytes())
+
+	// Both values must appear in locals (alwaysLocal forces extraction of every value).
+	if !strings.Contains(locals, "rg-a") {
+		t.Errorf("rg-a should be in locals.tf:\n%s", locals)
+	}
+	if !strings.Contains(locals, "rg-main") {
+		t.Errorf("rg-main should be in locals.tf:\n%s", locals)
+	}
+	// No raw string literals should remain in resource blocks.
+	if strings.Contains(src, `"rg-a"`) {
+		t.Errorf(`literal "rg-a" should have been replaced with a ref:\n%s`, src)
+	}
+	if strings.Contains(src, `"rg-main"`) {
+		t.Errorf(`literal "rg-main" should have been replaced with a ref:\n%s`, src)
+	}
+}
+
 func TestExtractVariables_WrittenFiles(t *testing.T) {
 	tmp := t.TempDir()
 	writeTFFile(t, tmp, "main.tf", threeResourceHCL)

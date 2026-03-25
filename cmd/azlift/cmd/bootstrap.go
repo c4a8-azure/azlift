@@ -110,6 +110,9 @@ func runBootstrap(cmd *cobra.Command, _ []string) error {
 	if result.CommitMessage != "" {
 		log.Info("initial commit created")
 	}
+	if result.BackendPRURL != "" {
+		log.Info(fmt.Sprintf("review and merge the PR to activate CI/CD: %s", result.BackendPRURL))
+	}
 	log.Info("bootstrap complete")
 	return nil
 }

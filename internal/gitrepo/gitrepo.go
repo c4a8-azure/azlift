@@ -40,6 +40,11 @@ func AddRemote(ctx context.Context, dir, name, url string) error {
 	return run(ctx, dir, "remote", "add", name, url)
 }
 
+// CreateBranch creates and checks out a new local branch.
+func CreateBranch(ctx context.Context, dir, name string) error {
+	return run(ctx, dir, "checkout", "-b", name)
+}
+
 // Push pushes branch to remote. Uses --set-upstream on first push.
 func Push(ctx context.Context, dir, remote, branch string) error {
 	return run(ctx, dir, "push", "--set-upstream", remote, branch)
