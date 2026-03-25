@@ -3,7 +3,9 @@ package refine
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Options controls the refine pipeline behaviour.
@@ -53,6 +55,17 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	files, err := ParseDir(opts.InputDir)
 	if err != nil {
 		return result, fmt.Errorf("parsing input: %w", err)
+	}
+	if len(files) == 0 {
+		if hint := exportParentHint(opts.InputDir); hint != "" {
+			return result, fmt.Errorf(
+				"no .tf files found in %s\n\n"+
+					"hint: %s\n"+
+					"      pass one of those as --input-dir instead",
+				opts.InputDir, hint,
+			)
+		}
+		return result, fmt.Errorf("no .tf files found in %s", opts.InputDir)
 	}
 
 	// 2. Variable extraction.
@@ -121,4 +134,31 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	result.Docs = docsResult
 
 	return result, nil
+}
+
+// exportParentHint checks whether dir looks like an aztfexport parent directory
+// (i.e. it contains subdirectories that themselves hold .tf files). If so it
+// returns a human-readable string listing the candidate subdirectories so the
+// user can pick the right --input-dir. Returns "" when no such layout is found.
+func exportParentHint(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var candidates []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		sub := filepath.Join(dir, e.Name())
+		tfs, _ := filepath.Glob(filepath.Join(sub, "*.tf"))
+		if len(tfs) > 0 {
+			candidates = append(candidates, sub)
+		}
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	return "looks like an export parent directory; found .tf files in:\n      " +
+		strings.Join(candidates, "\n      ")
 }
