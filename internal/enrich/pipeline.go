@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/anthropics/anthropic-sdk-go/option"
 
@@ -22,10 +23,10 @@ type Options struct {
 	SkipLifecycle bool
 	// SkipSecurity disables security anti-pattern scanning.
 	SkipSecurity bool
-	// SkipTags disables tag policy normalisation.
-	SkipTags bool
 	// SkipDescriptions disables AI description generation.
 	SkipDescriptions bool
+	// SkipAnalysis disables AI architecture analysis generation.
+	SkipAnalysis bool
 	// Log is an optional structured logger for progress output.
 	Log *slog.Logger
 }
@@ -36,10 +37,10 @@ type RunResult struct {
 	LifecycleInjected int
 	// SecurityFindings is the list of detected anti-patterns.
 	SecurityFindings []SecurityFinding
-	// TagsNormalised is the number of resource blocks whose tags were updated.
-	TagsNormalised int
 	// DescriptionsEnriched is the number of files enriched with AI descriptions.
 	DescriptionsEnriched int
+	// AnalysisFile is the path to the generated ANALYSIS.md, or "" when skipped.
+	AnalysisFile string
 }
 
 // Run executes the enrichment pipeline against the provided files.
@@ -76,12 +77,8 @@ func Run(ctx context.Context, files []*refine.ParsedFile, localsFile *refine.Par
 		}
 	}
 
-	// 3. Tag normalisation (deterministic, no API).
-	if !opts.SkipTags && localsFile != nil {
-		log.Debug("enrich: normalising tag policy")
-		result.TagsNormalised = NormaliseTags(files, localsFile)
-		log.Info(fmt.Sprintf("enrich: tags — %d resource(s) normalised to merge(local.common_tags, {...})", result.TagsNormalised))
-	}
+	// 3. Tag normalisation is handled by refine.Run() so it always applies
+	// regardless of whether --enrich is set. Nothing to do here.
 
 	// 4. AI description generation (requires API key).
 	if !opts.SkipDescriptions {
@@ -99,6 +96,32 @@ func Run(ctx context.Context, files []*refine.ParsedFile, localsFile *refine.Par
 			}
 			result.DescriptionsEnriched = enriched
 			log.Info(fmt.Sprintf("enrich: AI descriptions — %d file(s) enriched", enriched))
+		}
+	}
+
+	// 5. AI architecture analysis (requires API key).
+	if !opts.SkipAnalysis {
+		if opts.APIKey == "" {
+			log.Debug("enrich: skipping AI architecture analysis — ANTHROPIC_API_KEY not set")
+		} else {
+			log.Info(fmt.Sprintf("enrich: generating architecture analysis with AI model (%s)", modelName(opts)))
+			client, err := buildClient(opts)
+			if err != nil {
+				return result, fmt.Errorf("initialising AI client for analysis: %w", err)
+			}
+			analysisContent, err := GenerateAnalysis(ctx, client, files, log)
+			if err != nil {
+				return result, fmt.Errorf("AI architecture analysis: %w", err)
+			}
+			if analysisContent != "" {
+				outputDir := filepath.Dir(files[0].Path)
+				analysisFile, err := WriteAnalysis(outputDir, analysisContent)
+				if err != nil {
+					return result, fmt.Errorf("writing architecture analysis: %w", err)
+				}
+				result.AnalysisFile = analysisFile
+				log.Info("enrich: architecture analysis written", "path", analysisFile)
+			}
 		}
 	}
 

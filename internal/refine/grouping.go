@@ -16,7 +16,7 @@ var initPos = hcl.Pos{Line: 1, Column: 1}
 // canonical grouping table — add new entries here to extend without
 // changing any other code.
 var GroupMap = map[string][]string{
-	"networking.tf": {
+	"resources.networking.tf": {
 		"azurerm_virtual_network",
 		"azurerm_subnet",
 		"azurerm_network_security_group",
@@ -44,7 +44,7 @@ var GroupMap = map[string][]string{
 		"azurerm_lb_rule",
 		"azurerm_lb_probe",
 	},
-	"compute.tf": {
+	"resources.compute.tf": {
 		"azurerm_virtual_machine",
 		"azurerm_linux_virtual_machine",
 		"azurerm_windows_virtual_machine",
@@ -60,13 +60,15 @@ var GroupMap = map[string][]string{
 		"azurerm_shared_image",
 		"azurerm_shared_image_version",
 	},
-	"data.tf": {
+	"resources.storage.tf": {
 		"azurerm_storage_account",
 		"azurerm_storage_container",
 		"azurerm_storage_blob",
 		"azurerm_storage_queue",
 		"azurerm_storage_table",
 		"azurerm_storage_share",
+	},
+	"resources.databases.tf": {
 		"azurerm_sql_server",
 		"azurerm_sql_database",
 		"azurerm_mssql_server",
@@ -84,27 +86,29 @@ var GroupMap = map[string][]string{
 		"azurerm_redis_cache",
 		"azurerm_data_factory",
 		"azurerm_synapse_workspace",
+	},
+	"resources.messaging.tf": {
 		"azurerm_service_bus_namespace",
 		"azurerm_service_bus_queue",
 		"azurerm_service_bus_topic",
 		"azurerm_eventhub_namespace",
 		"azurerm_eventhub",
 	},
-	"keyvault.tf": {
+	"resources.keyvault.tf": {
 		"azurerm_key_vault",
 		"azurerm_key_vault_key",
 		"azurerm_key_vault_secret",
 		"azurerm_key_vault_certificate",
 		"azurerm_key_vault_access_policy",
 	},
-	"iam.tf": {
+	"resources.iam.tf": {
 		"azurerm_user_assigned_identity",
 		"azurerm_role_assignment",
 		"azurerm_role_definition",
 		"azurerm_policy_assignment",
 		"azurerm_policy_definition",
 	},
-	"monitoring.tf": {
+	"resources.monitoring.tf": {
 		"azurerm_log_analytics_workspace",
 		"azurerm_monitor_diagnostic_setting",
 		"azurerm_monitor_action_group",
@@ -112,7 +116,7 @@ var GroupMap = map[string][]string{
 		"azurerm_monitor_log_profile",
 		"azurerm_application_insights",
 	},
-	"appservice.tf": {
+	"resources.appservice.tf": {
 		"azurerm_app_service_plan",
 		"azurerm_service_plan",
 		"azurerm_app_service",
@@ -172,6 +176,14 @@ func GroupResources(files []*ParsedFile, outputDir string) []*ParsedFile {
 
 	for _, pf := range files {
 		for _, block := range pf.File.Body().Blocks() {
+			// Skip blocks that the scaffold generates into separate files:
+			//   terraform {}  → terraform.tf + backend.tf
+			//   provider {}   → providers.tf
+			// Keeping them here would cause Terraform to error on duplicate blocks.
+			if block.Type() == "terraform" || block.Type() == "provider" {
+				continue
+			}
+
 			var dest string
 			if block.Type() == "resource" && len(block.Labels()) >= 1 {
 				dest = targetFile(block.Labels()[0])

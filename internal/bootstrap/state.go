@@ -28,7 +28,7 @@ var saNameRe = regexp.MustCompile(`^[a-z0-9]{3,24}$`)
 //
 // Naming rules:
 //   - RG:  rg-tfstate-<sanitised-repo>
-//   - SA:  st + first 20 chars of sanitised repo (lowercase alphanum only, 3–24)
+//   - SA:  st + first 22 chars of sanitised repo (lowercase alphanum only, 3–24)
 //   - Container: "tfstate"
 func DeriveStateConfig(subscriptionID, repoName, location string) StateStorageConfig {
 	if location == "" {
@@ -77,7 +77,6 @@ func ValidateStateConfig(cfg StateStorageConfig) error {
 // safe for use in Azure resource names.
 func sanitiseRepoName(name string) string {
 	name = strings.ToLower(name)
-	// Replace any non-alphanumeric character with a hyphen.
 	var sb strings.Builder
 	for _, r := range name {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
@@ -86,7 +85,6 @@ func sanitiseRepoName(name string) string {
 			sb.WriteByte('-')
 		}
 	}
-	// Collapse consecutive hyphens and trim leading/trailing.
 	result := sb.String()
 	for strings.Contains(result, "--") {
 		result = strings.ReplaceAll(result, "--", "-")

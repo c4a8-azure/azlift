@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`azlift` is a Go CLI tool that orchestrates [aztfexport](https://github.com/Azure/aztfexport) and [az-bootstrap](https://github.com/kewalaka/az-bootstrap) into a pipeline that converts portal-created ("ClickOps") Azure resources into production-ready Terraform or Terragrunt code, fully wired into a Git-based CI/CD setup.
+`azlift` is a Go CLI tool that orchestrates [aztfexport](https://github.com/Azure/aztfexport) into a pipeline that converts portal-created ("ClickOps") Azure resources into production-ready Terraform or Terragrunt code, fully wired into a Git-based CI/CD setup. The bootstrap stage provisions state storage, Managed Identities with OIDC, and the GitHub repository entirely via native Azure SDK and `gh` CLI calls — no external PowerShell modules required.
 
 ## Language: Go — Final Decision
 
@@ -21,7 +21,6 @@ The reasoning, so this does not need to be relitigated:
 The tool wraps and depends on these external tools:
 - `az` (Azure CLI) — authenticated session required
 - `aztfexport` — core export engine
-- `az-bootstrap` (PowerShell 7) — CI/CD bootstrap engine
 - `gh` (GitHub CLI) — when targeting GitHub
 - `tflint` — linting pass after refine stage
 - `terraform-docs` — documentation generation
@@ -40,7 +39,7 @@ The four-stage pipeline is the core abstraction. Every major feature maps to one
    - Backend and provider generation
    - Optional: `--mode terragrunt` generates layered Terragrunt structure instead
    - Optional: `--enrich` AI pass for lifecycle rules, security flags, descriptions
-4. **BOOTSTRAP** — Wraps `az-bootstrap` to provision state storage, Managed Identities with OIDC federated credentials, and the Git repository with CI/CD pipelines
+4. **BOOTSTRAP** — Native Go pipeline: provisions state storage and Managed Identities with OIDC federated credentials via Azure SDK, creates the GitHub repository via `gh` CLI, writes GitHub Actions workflows per environment, and uploads the exported `terraform.tfstate` to remote storage
 
 ## CLI Entry Points
 

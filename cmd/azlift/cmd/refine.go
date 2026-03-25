@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -34,6 +35,9 @@ auto-remediations to the output files.`,
 	cmd.Flags().String("output-dir", "./refined", "Directory to write refined Terraform output")
 	cmd.Flags().String("mode", "modules", "Output mode: modules or terragrunt")
 	cmd.Flags().String("resource-group", "", "Resource group name (used for backend state key)")
+	cmd.Flags().String("terraform-version", "", "Minimum Terraform version constraint injected when the input omits required_version (default: \""+refine.DefaultMinTerraformVersion+"\")")
+	cmd.Flags().StringSlice("tag-keys", nil, "Tag keys to inject into local.common_tags on every resource (default: "+strings.Join(refine.StandardTagKeys, ",")+")")
+	cmd.Flags().Bool("no-tags", false, "Disable tag normalisation entirely")
 	cmd.Flags().Bool("enrich", false, "Run full enrichment pass (lifecycle, security, tags, AI descriptions)")
 	cmd.Flags().Bool("fix-security", false, "Auto-remediate safe security anti-patterns in the output")
 	cmd.Flags().Bool("skip-lint", false, "Skip the tflint pass")
@@ -47,6 +51,9 @@ func runRefine(cmd *cobra.Command, _ []string) error {
 	outputDir, _ := cmd.Flags().GetString("output-dir")
 	mode, _ := cmd.Flags().GetString("mode")
 	rg, _ := cmd.Flags().GetString("resource-group")
+	tfVersion, _ := cmd.Flags().GetString("terraform-version")
+	tagKeys, _ := cmd.Flags().GetStringSlice("tag-keys")
+	noTags, _ := cmd.Flags().GetBool("no-tags")
 	doEnrich, _ := cmd.Flags().GetBool("enrich")
 	fixSecurity, _ := cmd.Flags().GetBool("fix-security")
 	skipLint, _ := cmd.Flags().GetBool("skip-lint")
@@ -62,17 +69,22 @@ func runRefine(cmd *cobra.Command, _ []string) error {
 
 	// Run the core modules-mode pipeline.
 	result, err := refine.Run(cmd.Context(), refine.Options{
-		InputDir:      inputDir,
-		OutputDir:     outputDir,
-		ResourceGroup: rg,
-		SkipLint:      skipLint || mode == "terragrunt",
-		SkipDocs:      skipDocs,
+		InputDir:            inputDir,
+		OutputDir:           outputDir,
+		ResourceGroup:       rg,
+		MinTerraformVersion: tfVersion,
+		CommonTagKeys:       resolveTagKeys(tagKeys, noTags),
+		SkipLint:            skipLint || mode == "terragrunt",
+		SkipDocs:            skipDocs,
 	})
 	if err != nil {
 		return err
 	}
 
 	log.Info(fmt.Sprintf("wrote %d files to %s", len(result.Files), outputDir))
+	if result.StateCopied {
+		log.Info("terraform.tfstate copied to output directory for bootstrap stage")
+	}
 
 	if result.Lint.Skipped {
 		log.Info("lint skipped")
@@ -115,7 +127,9 @@ func runRefine(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("enrichment: %w", err)
 		}
 
-		_ = enrichResult // progress already logged inside enrich.Run
+		if enrichResult.AnalysisFile != "" {
+			log.Info(fmt.Sprintf("architecture analysis: %s (injected into README.md)", enrichResult.AnalysisFile))
+		}
 
 		// Re-write enriched files to disk.
 		for _, pf := range result.Files {

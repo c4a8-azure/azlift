@@ -3,9 +3,11 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/c4a8-azure/azlift/internal/refine"
 	"github.com/c4a8-azure/azlift/internal/run"
 )
 
@@ -13,39 +15,67 @@ func newRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run the full azlift pipeline end-to-end",
-		Long: `Orchestrate all four pipeline stages in sequence:
-  1. scan       — build resource inventory and dependency graph
+		Long: `Orchestrate all pipeline stages in sequence:
+
+  1. scan       — build resource inventory and cross-RG dependency graph
   2. export     — export via aztfexport
-  3. refine     — transform HCL into structured Terraform or Terragrunt
-  4. bootstrap  — provision CI/CD plumbing (skippable with --no-bootstrap)
+  3. refine     — transform HCL into structured Terraform (or Terragrunt)
+  4. repo init  — git init, embed CI/CD workflows, generate bootstrap/ module
+  5. github     — create GitHub repository and push
+  6. activate   — provision state storage, MIs, OIDC, RBAC, upload tfstate
+                  (same-tenant; skipped for cross-tenant — apply bootstrap/ instead)
 
-Use --no-bootstrap to generate code and run terraform plan without provisioning
-any Azure resources or Git repositories.
+Cross-tenant mode is detected automatically when --target-tenant differs from
+the source tenant.
 
-Use --dry-run to print the planned actions without executing any external tools.
-
-Example:
+Example (same-tenant):
   azlift run \
     --subscription <id> \
     --resource-group rg-myapp-prod \
     --repo-name infra-prod \
-    --org my-org \
-    --platform github`,
+    --org my-org
+
+Example (cross-tenant):
+  azlift run \
+    --subscription <source-id> \
+    --target-subscription <target-id> \
+    --target-tenant <target-tenant-id> \
+    --resource-group rg-myapp-prod \
+    --repo-name infra-prod \
+    --org my-org`,
 		RunE: runPipeline,
 	}
 
-	cmd.Flags().String("resource-group", "", "Resource group to process (required)")
+	// ── Source ────────────────────────────────────────────────────────────────
+	cmd.Flags().String("resource-group", "", "Resource group to export (required)")
+	cmd.Flags().StringSlice("resource-groups", nil, "All RGs in scope for RBAC (defaults to --resource-group)")
+
+	// ── Target ────────────────────────────────────────────────────────────────
+	cmd.Flags().String("target-subscription", "", "Target subscription for CI/CD resources (defaults to --subscription)")
+	cmd.Flags().String("target-tenant", "", "Target Azure AD tenant (if different → cross-tenant mode)")
+	cmd.Flags().String("tenant-id", "", "Source Azure AD tenant ID (auto-detected if empty)")
+
+	// ── Repository ────────────────────────────────────────────────────────────
 	cmd.Flags().String("repo-name", "", "Name of the Git repository to create")
-	cmd.Flags().String("org", "", "GitHub organisation or ADO organisation")
+	cmd.Flags().String("org", "", "GitHub organisation")
+	cmd.Flags().String("mi-resource-group", "", "RG for Managed Identities (defaults to --resource-group)")
+
+	// ── Tags ──────────────────────────────────────────────────────────────────
+	cmd.Flags().StringSlice("tag-keys", nil, "Tag keys to inject into local.common_tags on every resource (default: "+strings.Join(refine.StandardTagKeys, ",")+")")
+	cmd.Flags().Bool("no-tags", false, "Disable tag normalisation entirely")
+
+	// ── Output ────────────────────────────────────────────────────────────────
 	cmd.Flags().String("mode", "modules", "Output mode: modules or terragrunt")
-	cmd.Flags().String("platform", "github", "CI/CD platform: github or ado")
-	cmd.Flags().StringSlice("environments", []string{"prod", "staging", "dev"}, "Deployment environments (comma-separated)")
+	cmd.Flags().StringSlice("environments", []string{"prod", "dev"}, "Deployment environments (comma-separated)")
 	cmd.Flags().String("location", "westeurope", "Azure region for state storage")
-	cmd.Flags().String("tenant-id", "", "Azure AD tenant ID (auto-detected if empty)")
 	cmd.Flags().String("work-dir", ".azlift", "Base directory for all pipeline outputs")
+	cmd.Flags().String("workflows-dir", "", "Custom GitHub Actions workflows directory (default: embedded)")
+
+	// ── Enrichment ────────────────────────────────────────────────────────────
 	cmd.Flags().Bool("enrich", false, "Run AI enrichment pass (lifecycle, security, tags, descriptions)")
 	cmd.Flags().Bool("fix-security", false, "Auto-remediate safe security anti-patterns")
-	cmd.Flags().Bool("no-bootstrap", false, "Skip bootstrap; run terraform plan against refined output instead")
+
+	// ── Misc ──────────────────────────────────────────────────────────────────
 	cmd.Flags().Bool("dry-run", false, "Print planned actions without executing any external tools")
 	cmd.Flags().Bool("skip-lint", false, "Skip the tflint pass")
 	cmd.Flags().Bool("skip-docs", false, "Skip terraform-docs generation")
@@ -57,71 +87,64 @@ Example:
 
 func runPipeline(cmd *cobra.Command, _ []string) error {
 	resourceGroup, _ := cmd.Flags().GetString("resource-group")
+	resourceGroups, _ := cmd.Flags().GetStringSlice("resource-groups")
+	targetSub, _ := cmd.Flags().GetString("target-subscription")
+	targetTenant, _ := cmd.Flags().GetString("target-tenant")
+	tenantID, _ := cmd.Flags().GetString("tenant-id")
 	repoName, _ := cmd.Flags().GetString("repo-name")
 	org, _ := cmd.Flags().GetString("org")
+	miRG, _ := cmd.Flags().GetString("mi-resource-group")
 	mode, _ := cmd.Flags().GetString("mode")
-	platform, _ := cmd.Flags().GetString("platform")
 	envs, _ := cmd.Flags().GetStringSlice("environments")
 	location, _ := cmd.Flags().GetString("location")
-	tenantID, _ := cmd.Flags().GetString("tenant-id")
 	workDir, _ := cmd.Flags().GetString("work-dir")
+	workflowsDir, _ := cmd.Flags().GetString("workflows-dir")
 	doEnrich, _ := cmd.Flags().GetBool("enrich")
 	fixSecurity, _ := cmd.Flags().GetBool("fix-security")
-	noBootstrap, _ := cmd.Flags().GetBool("no-bootstrap")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	skipLint, _ := cmd.Flags().GetBool("skip-lint")
 	skipDocs, _ := cmd.Flags().GetBool("skip-docs")
+	tagKeys, _ := cmd.Flags().GetStringSlice("tag-keys")
+	noTags, _ := cmd.Flags().GetBool("no-tags")
 
 	sub, _ := cmd.Root().PersistentFlags().GetString("subscription")
 	if sub == "" {
 		return fmt.Errorf("--subscription is required")
 	}
 
-	if !noBootstrap && repoName == "" {
-		return fmt.Errorf("--repo-name is required for bootstrap; use --no-bootstrap to skip")
-	}
-	if !noBootstrap && org == "" {
-		return fmt.Errorf("--org is required for bootstrap; use --no-bootstrap to skip")
-	}
-
 	if fixSecurity {
 		doEnrich = true
 	}
 
+	if doEnrich && os.Getenv("ANTHROPIC_API_KEY") == "" {
+		Log.Info("ANTHROPIC_API_KEY not set — AI descriptions will be skipped")
+	}
+
 	log := Log.WithStage("RUN")
-	log.Info(fmt.Sprintf("pipeline: sub=%s rg=%s mode=%s", sub, resourceGroup, mode))
-
-	if dryRun {
-		log.Info("dry-run mode — no external tools will be called")
-	}
-
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if doEnrich {
-		if apiKey == "" {
-			log.Info("ANTHROPIC_API_KEY not set — AI descriptions will be skipped")
-		} else {
-			log.Info("ANTHROPIC_API_KEY detected — AI enrichment enabled")
-		}
-	}
+	log.Info(fmt.Sprintf("pipeline start: sub=%s rg=%s mode=%s", sub, resourceGroup, mode))
 
 	result, err := run.Run(cmd.Context(), run.Options{
-		SubscriptionID: sub,
-		ResourceGroup:  resourceGroup,
-		RepoName:       repoName,
-		RepoOrg:        org,
-		Platform:       platform,
-		Environments:   envs,
-		Location:       location,
-		TenantID:       tenantID,
-		WorkDir:        workDir,
-		Mode:           mode,
-		Enrich:         doEnrich,
-		FixSecurity:    fixSecurity,
-		NoBootstrap:    noBootstrap,
-		DryRun:         dryRun,
-		SkipLint:       skipLint,
-		SkipDocs:       skipDocs,
-		Log:            Log.Slog(),
+		SubscriptionID:     sub,
+		ResourceGroup:      resourceGroup,
+		ResourceGroups:     resourceGroups,
+		TargetSubscription: targetSub,
+		TargetTenant:       targetTenant,
+		TenantID:           tenantID,
+		RepoName:           repoName,
+		RepoOrg:            org,
+		MIResourceGroup:    miRG,
+		Mode:               mode,
+		Environments:       envs,
+		Location:           location,
+		WorkDir:            workDir,
+		WorkflowsDir:       workflowsDir,
+		CommonTagKeys:      resolveTagKeys(tagKeys, noTags),
+		Enrich:             doEnrich,
+		FixSecurity:        fixSecurity,
+		DryRun:             dryRun,
+		SkipLint:           skipLint,
+		SkipDocs:           skipDocs,
+		Log:                Log.Slog(),
 	})
 	if err != nil {
 		return err
@@ -134,22 +157,15 @@ func runPipeline(cmd *cobra.Command, _ []string) error {
 	if result.ScanResult != nil {
 		log.Info(fmt.Sprintf("scan: %d resource group(s)", len(result.ScanResult.ResourceGroups)))
 	}
-	log.Info(fmt.Sprintf("refine: %d file(s) written to %s", len(result.RefineResult.Files), result.RefinedDir))
+	log.Info(fmt.Sprintf("refine: %d file(s) → %s", len(result.RefineResult.Files), result.RefinedDir))
 
 	if result.BootstrapResult != nil {
 		br := result.BootstrapResult
 		log.Info(fmt.Sprintf("bootstrap: state storage %s/%s",
-			br.StateStorage.ResourceGroupName,
-			br.StateStorage.StorageAccountName))
-		log.Info(fmt.Sprintf("bootstrap: %d Managed Identity(ies) provisioned", len(br.Identities)))
-		if br.CommitMessage != "" {
-			log.Info("bootstrap: initial commit created")
+			br.StateStorage.ResourceGroupName, br.StateStorage.StorageAccountName))
+		if br.IsCrossTenant {
+			log.Info("bootstrap: apply bootstrap/ module in target tenant to activate CI/CD")
 		}
-	}
-
-	if result.TerraformPlanOutput != "" {
-		log.Info("terraform plan output:")
-		log.Info(result.TerraformPlanOutput)
 	}
 
 	log.Info("pipeline complete")

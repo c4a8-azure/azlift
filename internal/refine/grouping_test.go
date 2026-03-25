@@ -44,17 +44,19 @@ func TestGroupResources_SplitsIntoFiles(t *testing.T) {
 		fileMap[filepath.Base(pf.Path)] = pf
 	}
 
-	if _, ok := fileMap["networking.tf"]; !ok {
-		t.Error("expected networking.tf")
+	if _, ok := fileMap["resources.networking.tf"]; !ok {
+		t.Error("expected resources.networking.tf")
 	}
-	if _, ok := fileMap["compute.tf"]; !ok {
-		t.Error("expected compute.tf")
+	if _, ok := fileMap["resources.compute.tf"]; !ok {
+		t.Error("expected resources.compute.tf")
 	}
-	if _, ok := fileMap["data.tf"]; !ok {
-		t.Error("expected data.tf")
+	if _, ok := fileMap["resources.storage.tf"]; !ok {
+		t.Error("expected resources.storage.tf")
 	}
+	// main.tf contains the catch-all unknown resource; terraform/provider blocks
+	// are stripped here because scaffold writes them to terraform.tf/providers.tf.
 	if _, ok := fileMap["main.tf"]; !ok {
-		t.Error("expected main.tf (catch-all + terraform block)")
+		t.Error("expected main.tf (catch-all for unknown resource types)")
 	}
 }
 
@@ -107,22 +109,25 @@ func TestGroupResources_UnknownTypeGoesToMain(t *testing.T) {
 	t.Error("main.tf not found in output")
 }
 
-func TestGroupResources_TerraformBlockInMain(t *testing.T) {
+func TestGroupResources_TerraformBlockStripped(t *testing.T) {
 	tmp := t.TempDir()
 	writeTFFile(t, tmp, "main.tf", mixedHCL)
 	files, _ := ParseDir(tmp)
 
 	out := GroupResources(files, tmp)
 
+	// terraform {} and provider {} blocks must NOT appear in any grouped output
+	// file — scaffold writes them to terraform.tf/providers.tf/backend.tf to avoid
+	// "duplicate block" errors from Terraform.
 	for _, pf := range out {
-		if filepath.Base(pf.Path) == "main.tf" {
-			if !strings.Contains(string(pf.File.Bytes()), "required_version") {
-				t.Error("terraform block should be in main.tf")
-			}
-			return
+		content := string(pf.File.Bytes())
+		if strings.Contains(content, "required_version") {
+			t.Errorf("terraform block leaked into %s — should be stripped by GroupResources", filepath.Base(pf.Path))
+		}
+		if strings.Contains(content, `provider "azurerm"`) {
+			t.Errorf("provider block leaked into %s — should be stripped by GroupResources", filepath.Base(pf.Path))
 		}
 	}
-	t.Error("main.tf not found in output")
 }
 
 func TestGroupResources_EmptyInput(t *testing.T) {
@@ -138,14 +143,14 @@ func TestTargetFile_KnownTypes(t *testing.T) {
 		resourceType string
 		wantFile     string
 	}{
-		{"azurerm_virtual_network", "networking.tf"},
-		{"azurerm_subnet", "networking.tf"},
-		{"azurerm_linux_virtual_machine", "compute.tf"},
-		{"azurerm_storage_account", "data.tf"},
-		{"azurerm_key_vault", "keyvault.tf"},
-		{"azurerm_role_assignment", "iam.tf"},
-		{"azurerm_log_analytics_workspace", "monitoring.tf"},
-		{"azurerm_kubernetes_cluster", "appservice.tf"},
+		{"azurerm_virtual_network", "resources.networking.tf"},
+		{"azurerm_subnet", "resources.networking.tf"},
+		{"azurerm_linux_virtual_machine", "resources.compute.tf"},
+		{"azurerm_storage_account", "resources.storage.tf"},
+		{"azurerm_key_vault", "resources.keyvault.tf"},
+		{"azurerm_role_assignment", "resources.iam.tf"},
+		{"azurerm_log_analytics_workspace", "resources.monitoring.tf"},
+		{"azurerm_kubernetes_cluster", "resources.appservice.tf"},
 		{"azurerm_something_custom", "main.tf"},
 	}
 	for _, tc := range cases {

@@ -3,7 +3,10 @@ package refine
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Options controls the refine pipeline behaviour.
@@ -14,6 +17,13 @@ type Options struct {
 	OutputDir string
 	// ResourceGroup is used to derive the backend state key.
 	ResourceGroup string
+	// MinTerraformVersion overrides the required_version injected into
+	// terraform.tf when the aztfexport input omits it. Defaults to ">= 1.10".
+	MinTerraformVersion string
+	// CommonTagKeys overrides the default set of keys injected into
+	// local.common_tags. nil → StandardTagKeys; []string{} → empty common_tags
+	// (preserves existing resource tags but injects no standard keys).
+	CommonTagKeys []string
 	// SkipLint bypasses the tflint pass when true.
 	SkipLint bool
 	// SkipDocs bypasses terraform-docs generation when true.
@@ -35,17 +45,22 @@ type Result struct {
 	Lint LintResult
 	// Docs holds the outcome of the terraform-docs pass.
 	Docs DocsResult
+	// StateCopied is true when terraform.tfstate was found in InputDir and
+	// copied to OutputDir so the bootstrap stage can locate it there.
+	StateCopied bool
 }
 
 // Run executes the full refine pipeline in modules mode:
 //
 //  1. Parse all .tf files in InputDir.
 //  2. Extract repeated literals into variables.tf / locals.tf.
-//  3. Group resource blocks into topic files.
-//  4. Generate backend.tf, versions.tf, providers.tf.
-//  5. Write all files to OutputDir.
-//  6. Run tflint (unless SkipLint).
-//  7. Run terraform-docs (unless SkipDocs).
+//  3. Normalise tags — inject common_tags local and rewrite resource tags to merge().
+//  4. Group resource blocks into topic files.
+//  5. Generate backend.tf, terraform.tf, providers.tf.
+//  6. Write all files to OutputDir.
+//  7. Copy terraform.tfstate from InputDir → OutputDir (if present).
+//  8. Run tflint (unless SkipLint).
+//  9. Run terraform-docs (unless SkipDocs).
 func Run(ctx context.Context, opts Options) (Result, error) {
 	var result Result
 
@@ -54,6 +69,17 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return result, fmt.Errorf("parsing input: %w", err)
 	}
+	if len(files) == 0 {
+		if hint := exportParentHint(opts.InputDir); hint != "" {
+			return result, fmt.Errorf(
+				"no .tf files found in %s\n\n"+
+					"hint: %s\n"+
+					"      pass one of those as --input-dir instead",
+				opts.InputDir, hint,
+			)
+		}
+		return result, fmt.Errorf("no .tf files found in %s", opts.InputDir)
+	}
 
 	// 2. Variable extraction.
 	varsFile, localsFile, err := ExtractVariables(files, opts.OutputDir)
@@ -61,7 +87,10 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return result, fmt.Errorf("extracting variables: %w", err)
 	}
 
-	// 3. Group resource blocks into topic files.
+	// 3. Tag normalisation. nil CommonTagKeys → StandardTagKeys; []string{} → empty common_tags.
+	NormaliseTags(files, localsFile, opts.CommonTagKeys...)
+
+	// 4. Group resource blocks into topic files.
 	grouped := GroupResources(files, opts.OutputDir)
 
 	// 4. Scaffold files.
@@ -75,9 +104,15 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return result, fmt.Errorf("generating backend.tf: %w", err)
 	}
 
-	versionsFile, err := GenerateVersions(opts.OutputDir, "", nil)
+	versionsFile, err := ExtractTerraformBlock(opts.OutputDir, files, opts.MinTerraformVersion)
 	if err != nil {
-		return result, fmt.Errorf("generating versions.tf: %w", err)
+		return result, fmt.Errorf("extracting terraform.tf: %w", err)
+	}
+	if versionsFile == nil {
+		versionsFile, err = GenerateVersions(opts.OutputDir, opts.MinTerraformVersion, nil)
+		if err != nil {
+			return result, fmt.Errorf("generating terraform.tf: %w", err)
+		}
 	}
 
 	providersFile, err := GenerateProvider(opts.OutputDir)
@@ -97,7 +132,18 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	result.Files = allFiles
 
-	// 6. tflint.
+	// 6. Carry terraform.tfstate forward from the export dir so the bootstrap
+	// stage can locate it at OutputDir/terraform.tfstate without needing an
+	// explicit --state-dir flag.
+	srcState := filepath.Join(opts.InputDir, "terraform.tfstate")
+	dstState := filepath.Join(opts.OutputDir, "terraform.tfstate")
+	if copied, copyErr := copyFileIfExists(srcState, dstState); copyErr != nil {
+		return result, fmt.Errorf("copying terraform.tfstate: %w", copyErr)
+	} else {
+		result.StateCopied = copied
+	}
+
+	// 8. tflint.
 	lintRunner := opts.LintRunner
 	if lintRunner == nil {
 		lintRunner = &ExecTflintRunner{}
@@ -108,7 +154,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	result.Lint = lintResult
 
-	// 7. terraform-docs.
+	// 9. terraform-docs.
 	docsRunner := opts.DocsRunner
 	if docsRunner == nil {
 		docsRunner = &ExecTerraformDocsRunner{}
@@ -121,4 +167,55 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	result.Docs = docsResult
 
 	return result, nil
+}
+
+// copyFileIfExists copies src to dst when src exists. Returns (true, nil) on
+// success, (false, nil) when src is absent, or (false, err) on failure.
+func copyFileIfExists(src, dst string) (bool, error) {
+	in, err := os.Open(src) //nolint:gosec
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst) //nolint:gosec
+	if err != nil {
+		return false, err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// exportParentHint checks whether dir looks like an aztfexport parent directory
+// (i.e. it contains subdirectories that themselves hold .tf files). If so it
+// returns a human-readable string listing the candidate subdirectories so the
+// user can pick the right --input-dir. Returns "" when no such layout is found.
+func exportParentHint(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var candidates []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		sub := filepath.Join(dir, e.Name())
+		tfs, _ := filepath.Glob(filepath.Join(sub, "*.tf"))
+		if len(tfs) > 0 {
+			candidates = append(candidates, sub)
+		}
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	return "looks like an export parent directory; found .tf files in:\n      " +
+		strings.Join(candidates, "\n      ")
 }

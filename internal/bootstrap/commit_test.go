@@ -50,6 +50,9 @@ func TestWriteAzBootstrapConfig_CreatesFile(t *testing.T) {
 	if !strings.Contains(string(data), "sub-123") {
 		t.Error("expected subscription ID in .azbootstrap.jsonc")
 	}
+	if !strings.Contains(string(data), "tenant-456") {
+		t.Error("expected tenant ID in .azbootstrap.jsonc")
+	}
 }
 
 func TestWriteAzBootstrapConfig_ValidJSON(t *testing.T) {

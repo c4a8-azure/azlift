@@ -45,8 +45,9 @@ func (r *ExecTflintRunner) Run(ctx context.Context, dir string) (string, int, er
 }
 
 // RunLint runs tflint against dir using runner. When skip is true it returns
-// a Skipped result without invoking the runner. A non-zero exit code from
-// tflint is returned as an error.
+// a Skipped result without invoking the runner.
+// Warnings are non-fatal: they are captured in LintResult but do not cause
+// an error return. Only tflint Error-level findings fail the pipeline.
 func RunLint(ctx context.Context, runner TflintRunner, dir string, skip bool) (LintResult, error) {
 	if skip {
 		return LintResult{Skipped: true}, nil
@@ -57,26 +58,26 @@ func RunLint(ctx context.Context, runner TflintRunner, dir string, skip bool) (L
 		return LintResult{Output: output}, err
 	}
 
-	issues := countIssues(output)
-	result := LintResult{Output: output, Issues: issues}
+	errors, warnings := countIssues(output)
+	result := LintResult{Output: output, Issues: errors + warnings}
 
-	if exitCode != 0 {
-		return result, fmt.Errorf("tflint reported %d issue(s):\n%s", issues, output)
+	if exitCode != 0 && errors > 0 {
+		return result, fmt.Errorf("tflint reported %d error(s):\n%s", errors, output)
 	}
 	return result, nil
 }
 
-// countIssues counts lines that look like tflint findings.
-// tflint outputs one "[severity] message (rule)" line per finding.
-func countIssues(output string) int {
-	count := 0
+// countIssues counts tflint findings by severity.
+// tflint outputs one "Error:" or "Warning:" line per finding.
+func countIssues(output string) (errors, warnings int) {
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "[") && (strings.Contains(line, "[error]") ||
-			strings.Contains(line, "[warning]") ||
-			strings.Contains(line, "[notice]")) {
-			count++
+		switch {
+		case strings.HasPrefix(line, "Error:"):
+			errors++
+		case strings.HasPrefix(line, "Warning:"):
+			warnings++
 		}
 	}
-	return count
+	return
 }

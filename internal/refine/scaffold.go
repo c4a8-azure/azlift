@@ -62,17 +62,68 @@ var DefaultProviderPins = []ProviderPin{
 	{Source: "azure/azapi", Version: "~> 2.0"},
 }
 
-// GenerateVersions writes versions.tf into outputDir with a terraform block
-// containing required_version and required_providers.
+// DefaultMinTerraformVersion is the required_version injected when aztfexport
+// omits it and no override is provided via Options.MinTerraformVersion.
+const DefaultMinTerraformVersion = ">= 1.10"
+
+// ExtractTerraformBlock finds the terraform {} block from the parsed input
+// files, strips any embedded backend {} sub-block (which lives in backend.tf),
+// and writes the result as terraform.tf in outputDir.
+// minVersion is injected as required_version when the input block omits it;
+// pass "" to use DefaultMinTerraformVersion.
+// Returns nil when no terraform block is present in the input — the caller
+// should fall back to GenerateVersions in that case.
+func ExtractTerraformBlock(outputDir string, files []*ParsedFile, minVersion string) (*ParsedFile, error) {
+	if minVersion == "" {
+		minVersion = DefaultMinTerraformVersion
+	}
+	for _, pf := range files {
+		for _, block := range pf.File.Body().Blocks() {
+			if block.Type() != "terraform" {
+				continue
+			}
+			// Re-parse a mutable clone of the block.
+			src := block.BuildTokens(nil).Bytes()
+			f, diags := hclwrite.ParseConfig(append(src, '\n'), "<terraform>", initPos)
+			if diags.HasErrors() {
+				continue
+			}
+			// Strip backend sub-block — it lives in backend.tf.
+			// Also inject required_version if aztfexport omitted it (tflint requires it).
+			for _, outer := range f.Body().Blocks() {
+				if outer.Type() != "terraform" {
+					continue
+				}
+				for _, sub := range outer.Body().Blocks() {
+					if sub.Type() == "backend" {
+						outer.Body().RemoveBlock(sub)
+					}
+				}
+				if outer.Body().GetAttribute("required_version") == nil {
+					outer.Body().SetAttributeValue("required_version", cty.StringVal(minVersion))
+				}
+			}
+			out := NewFile(filepath.Join(outputDir, "terraform.tf"))
+			out.File = f
+			return out, nil
+		}
+	}
+	return nil, nil
+}
+
+// GenerateVersions writes terraform.tf into outputDir with a terraform block
+// containing required_version and required_providers. Used as a fallback when
+// the input files contain no terraform block (e.g. when refining without a
+// prior aztfexport run).
 func GenerateVersions(outputDir string, minTerraformVersion string, pins []ProviderPin) (*ParsedFile, error) {
 	if minTerraformVersion == "" {
-		minTerraformVersion = ">= 1.5.0"
+		minTerraformVersion = DefaultMinTerraformVersion
 	}
 	if len(pins) == 0 {
 		pins = DefaultProviderPins
 	}
 
-	pf := NewFile(filepath.Join(outputDir, "versions.tf"))
+	pf := NewFile(filepath.Join(outputDir, "terraform.tf"))
 	body := pf.File.Body()
 
 	tfBlock := body.AppendNewBlock("terraform", nil)
@@ -95,12 +146,17 @@ func GenerateVersions(outputDir string, minTerraformVersion string, pins []Provi
 }
 
 // GenerateProvider writes a minimal provider block for azurerm.
+// storage_use_azuread = true prevents the provider from calling
+// listKeys on storage accounts during plan/apply — the plan MI only
+// has Reader, not the Contributor needed for that action.
 func GenerateProvider(outputDir string) (*ParsedFile, error) {
 	pf := NewFile(filepath.Join(outputDir, "providers.tf"))
 	body := pf.File.Body()
 
 	p := body.AppendNewBlock("provider", []string{"azurerm"})
-	p.Body().AppendNewBlock("features", nil)
+	pb := p.Body()
+	pb.SetAttributeValue("storage_use_azuread", cty.True)
+	pb.AppendNewBlock("features", nil)
 
 	return pf, nil
 }

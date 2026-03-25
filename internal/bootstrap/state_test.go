@@ -1,8 +1,6 @@
 package bootstrap
 
-import (
-	"testing"
-)
+import "testing"
 
 func TestDeriveStateConfig_BasicRepo(t *testing.T) {
 	cfg := DeriveStateConfig("sub-123", "infra-prod", "")

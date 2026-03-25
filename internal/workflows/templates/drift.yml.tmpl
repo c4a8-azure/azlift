@@ -1,0 +1,253 @@
+name: "Drift Detection · {{ .Environment }}"
+
+on:
+  schedule:
+    - cron: '0 6 * * 1-5'   # 06:00 UTC, Monday–Friday
+  workflow_dispatch:
+    inputs:
+      notify_only:
+        description: 'Open issue but do not fail the job'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  drift:
+    name: detect drift
+    runs-on: ubuntu-latest
+    environment: {{ .Environment }}-iac-plan
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
+
+    env:
+      TF_ENV: {{ .Environment }}
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ "{{" }} vars.AZURE_CLIENT_ID {{ "}}" }}
+      ARM_TENANT_ID: ${{ "{{" }} vars.AZURE_TENANT_ID {{ "}}" }}
+      ARM_SUBSCRIPTION_ID: ${{ "{{" }} vars.AZURE_SUBSCRIPTION_ID {{ "}}" }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Abort early if the remote backend has not been activated yet.
+      # The bootstrap stage commits a placeholder backend.tf to main and opens
+      # a PR (chore/activate-backend) with the real storage account name.
+      # Until that PR is merged the workflow cannot reach the backend.
+      - name: Check backend is activated
+        run: |
+          if grep -qE 'FILL_IN|<STORAGE_ACCOUNT>' backend.tf 2>/dev/null; then
+            echo "::error title=Backend not activated::backend.tf still contains placeholder values."
+            echo "::error::Merge the 'chore/activate-backend' pull request to configure"
+            echo "::error::the remote backend before drift detection can run."
+            exit 1
+          fi
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ "{{" }} vars.AZURE_CLIENT_ID {{ "}}" }}
+          tenant-id: ${{ "{{" }} vars.AZURE_TENANT_ID {{ "}}" }}
+          subscription-id: ${{ "{{" }} vars.AZURE_SUBSCRIPTION_ID {{ "}}" }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false   # raw exit codes required for -detailed-exitcode
+
+      - name: Terraform init
+        run: terraform init -reconfigure
+
+      # -detailed-exitcode: 0 = no changes, 1 = error, 2 = drift detected
+      - name: Terraform plan
+        id: plan
+        run: |
+          set +e
+          terraform plan \
+            -detailed-exitcode \
+            -refresh=true \
+            -out=drift.tfplan \
+            -no-color 2>&1 | tee plan.log
+          echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          set -e
+
+      # Convert the binary plan to JSON and build a structured markdown report
+      # using only the Python stdlib — no external dependencies required.
+      - name: Parse drift report
+        id: report
+        if: steps.plan.outputs.exitcode == '2'
+        run: |
+          terraform show -json drift.tfplan > drift.json
+          python3 - <<'PYEOF'
+          import json, os, sys
+
+          with open('drift.json') as f:
+              plan = json.load(f)
+
+          changes = [
+              c for c in plan.get('resource_changes', [])
+              if c['change']['actions'] != ['no-op']
+          ]
+
+          repo    = os.environ.get('GITHUB_REPOSITORY', '')
+          run_id  = os.environ.get('GITHUB_RUN_ID', '')
+          run_url = f"https://github.com/{repo}/actions/runs/{run_id}"
+          env     = os.environ['TF_ENV']
+          today   = __import__('datetime').date.today().isoformat()
+
+          creates  = [c for c in changes if c['change']['actions'] == ['create']]
+          updates  = [c for c in changes if c['change']['actions'] == ['update']]
+          replaces = [c for c in changes if set(c['change']['actions']) >= {'create', 'delete'}]
+          deletes  = [c for c in changes if c['change']['actions'] == ['delete']]
+
+          lines = [
+              f"## 🔍 Drift detected in `{env}` — {today}",
+              "",
+              f"> **{len(changes)} resource(s)** out of sync with Terraform state  "
+              f"· [View run]({run_url})",
+              "",
+          ]
+
+          def table(emoji, heading, items):
+              if not items:
+                  return []
+              rows = [
+                  f"### {emoji} {heading} ({len(items)})", "",
+                  "| Resource address | Type |",
+                  "|------------------|------|",
+              ]
+              for c in sorted(items, key=lambda x: x['address']):
+                  rows.append(f"| `{c['address']}` | `{c['type']}` |")
+              rows.append("")
+              return rows
+
+          lines += table("🟢", "Will be created",  creates)
+          lines += table("🟡", "Will be updated",  updates)
+          lines += table("🔴", "Will be replaced", replaces)
+          lines += table("⛔", "Will be deleted",  deletes)
+
+          lines += [
+              "---",
+              "_To remediate: review the changes above and run `terraform apply` "
+              "or update your Terraform code to match the intended state._",
+          ]
+
+          body = "\n".join(lines)
+
+          with open('drift_report.md', 'w') as f:
+              f.write(body)
+
+          summary = os.environ.get('GITHUB_STEP_SUMMARY', '/dev/null')
+          with open(summary, 'a') as f:
+              f.write(body + "\n")
+
+          print(f"::notice title=Drift detected::{len(changes)} resource(s) out of sync in {env}")
+          PYEOF
+
+      # Create labels idempotently — 422 just means they already exist.
+      - name: Ensure drift labels exist
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = [
+              { name: 'drift',           color: 'e11d48', description: 'Terraform state drift detected'  },
+              { name: '${{ .Environment }}', color: '7c3aed', description: 'Environment: ${{ .Environment }}' },
+              { name: 'drift:resolved',  color: '16a34a', description: 'Drift was resolved'              },
+            ]
+            for (const label of labels) {
+              try {
+                await github.rest.issues.createLabel({ ...context.repo, ...label })
+              } catch (e) {
+                if (e.status !== 422) throw e
+              }
+            }
+
+      # Open a new issue or append a comment to the existing open issue.
+      # One live issue per environment — keeps the signal-to-noise ratio low.
+      - name: Open or update drift issue
+        if: steps.plan.outputs.exitcode == '2'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs')
+            const body    = fs.readFileSync('drift_report.md', 'utf8')
+            const title   = '🔍 Terraform drift detected: `${{ .Environment }}`'
+            const envLabel = '${{ .Environment }}'
+            const labels  = ['drift', envLabel]
+
+            const { data: open } = await github.rest.issues.listForRepo({
+              ...context.repo, state: 'open', labels: labels.join(','),
+            })
+            const existing = open.find(i => i.title === title)
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: existing.number,
+                body,
+              })
+              core.notice(`Drift issue #${existing.number} updated`)
+            } else {
+              const { data: issue } = await github.rest.issues.create({
+                ...context.repo, title, body, labels,
+              })
+              core.notice(`Drift issue #${issue.number} opened: ${issue.html_url}`)
+            }
+
+      # Auto-close the drift issue when a run comes back clean.
+      - name: Close resolved drift issue
+        if: steps.plan.outputs.exitcode == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title   = '🔍 Terraform drift detected: `${{ .Environment }}`'
+            const envLabel = '${{ .Environment }}'
+            const labels  = ['drift', envLabel]
+
+            const { data: open } = await github.rest.issues.listForRepo({
+              ...context.repo, state: 'open', labels: labels.join(','),
+            })
+            const existing = open.find(i => i.title === title)
+
+            if (existing) {
+              const today = new Date().toISOString().slice(0, 10)
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: existing.number,
+                body: `### ✅ Drift resolved — ${today}\n\nNo changes detected. Infrastructure matches state.`,
+              })
+              await github.rest.issues.update({
+                ...context.repo,
+                issue_number: existing.number,
+                state: 'closed',
+                labels: [envLabel, 'drift:resolved'],
+              })
+              core.notice(`Drift issue #${existing.number} closed — environment is clean`)
+            }
+
+      - name: Write clean summary
+        if: steps.plan.outputs.exitcode == '0'
+        run: |
+          {
+            echo "## ✅ No drift: \`${{ .Environment }}\`"
+            echo ""
+            echo "Infrastructure matches Terraform state as of $(date -u '+%Y-%m-%d %H:%M UTC')"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Make the job red when drift is found so branch protection and
+      # notification rules fire naturally. Can be suppressed with notify_only.
+      - name: Fail on drift
+        if: |
+          steps.plan.outputs.exitcode == '2' &&
+          github.event.inputs.notify_only != 'true'
+        run: |
+          echo "::error::Drift detected in ${{ .Environment }} — see the issue opened in this repository"
+          exit 1
+
+      - name: Fail on plan error
+        if: steps.plan.outputs.exitcode == '1'
+        run: |
+          echo "::error::terraform plan exited with an error — check the logs above"
+          exit 1

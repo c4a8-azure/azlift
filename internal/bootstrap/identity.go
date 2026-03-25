@@ -13,6 +13,10 @@ type ManagedIdentity struct {
 	Environment string
 	// Role is either "plan" (Reader) or "apply" (Contributor).
 	Role string
+	// ClientID is the Azure AD application (client) ID.
+	ClientID string
+	// ResourceID is the full Azure resource ID.
+	ResourceID string
 }
 
 // MIName derives the MI resource name for an environment + role combination.
@@ -23,18 +27,18 @@ func MIName(repoName, environment, role string) string {
 	return fmt.Sprintf("mi-%s-%s-%s", slug, environment, role)
 }
 
-// rbacRoleForRole maps the azlift role name to the Azure RBAC role name.
-func rbacRoleForRole(role string) string {
+// roleGUIDForRole maps the azlift role name to a well-known Azure RBAC role GUID.
+func roleGUIDForRole(role string) string {
 	switch strings.ToLower(role) {
 	case "apply":
-		return "Contributor"
+		return "b24988ac-6180-42a0-ab88-20f7382dd24c" // Contributor
 	default:
-		return "Reader"
+		return "acdd72a7-3385-48ef-bd42-f606fba81ae7" // Reader
 	}
 }
 
-// AzBootstrapConfig is the `.azbootstrap.jsonc` contract written by azlift
-// after bootstrapping, recording the state backend configuration.
+// AzBootstrapConfig is written to .azbootstrap.jsonc in the output repo to
+// record the bootstrap parameters for reference and future automation.
 type AzBootstrapConfig struct {
 	// SchemaVersion identifies the file format.
 	SchemaVersion string `json:"schemaVersion"`

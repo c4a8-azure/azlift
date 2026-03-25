@@ -56,7 +56,7 @@ func TestGenerateVersions_DefaultPins(t *testing.T) {
 	out := string(pf.File.Bytes())
 	for _, want := range []string{
 		"required_version",
-		">= 1.5.0",
+		">= 1.10",
 		"required_providers",
 		"hashicorp/azurerm",
 		"~> 4.0",
@@ -64,7 +64,7 @@ func TestGenerateVersions_DefaultPins(t *testing.T) {
 		"~> 2.0",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("versions.tf missing %q\nfull output:\n%s", want, out)
+			t.Errorf("terraform.tf missing %q\nfull output:\n%s", want, out)
 		}
 	}
 }
@@ -99,6 +99,9 @@ func TestGenerateProvider_AzurermBlock(t *testing.T) {
 	}
 	if !strings.Contains(out, "features") {
 		t.Errorf("providers.tf missing features block:\n%s", out)
+	}
+	if !strings.Contains(out, "storage_use_azuread") {
+		t.Errorf("providers.tf missing storage_use_azuread = true (required to avoid listKeys 403):\n%s", out)
 	}
 }
 
