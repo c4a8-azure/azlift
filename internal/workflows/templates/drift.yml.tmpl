@@ -57,7 +57,7 @@ jobs:
           terraform_wrapper: false   # raw exit codes required for -detailed-exitcode
 
       - name: Terraform init
-        run: terraform init
+        run: terraform init -reconfigure
 
       # -detailed-exitcode: 0 = no changes, 1 = error, 2 = drift detected
       - name: Terraform plan
