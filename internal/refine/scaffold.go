@@ -80,6 +80,7 @@ func ExtractTerraformBlock(outputDir string, files []*ParsedFile) (*ParsedFile, 
 				continue
 			}
 			// Strip backend sub-block — it lives in backend.tf.
+			// Also inject required_version if aztfexport omitted it (tflint requires it).
 			for _, outer := range f.Body().Blocks() {
 				if outer.Type() != "terraform" {
 					continue
@@ -88,6 +89,9 @@ func ExtractTerraformBlock(outputDir string, files []*ParsedFile) (*ParsedFile, 
 					if sub.Type() == "backend" {
 						outer.Body().RemoveBlock(sub)
 					}
+				}
+				if outer.Body().GetAttribute("required_version") == nil {
+					outer.Body().SetAttributeValue("required_version", cty.StringVal(">= 1.5.0"))
 				}
 			}
 			out := NewFile(filepath.Join(outputDir, "terraform.tf"))

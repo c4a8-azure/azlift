@@ -42,17 +42,29 @@ func TestRunLint_CleanRun(t *testing.T) {
 	}
 }
 
-func TestRunLint_NonZeroExitReturnsError(t *testing.T) {
-	out := "[error] Missing required attribute (azurerm_virtual_network_required_attrs)\n"
-	runner := &mockTflint{output: out, exitCode: 2}
+func TestRunLint_ErrorLevelFails(t *testing.T) {
+	out := "Error: Missing required attribute (azurerm_virtual_network_required_attrs)\n"
+	runner := &mockTflint{output: out, exitCode: 1}
 	_, err := RunLint(context.Background(), runner, "/tmp", false)
 	if err == nil {
-		t.Error("expected error for non-zero exit")
+		t.Error("expected error for tflint Error-level finding")
+	}
+}
+
+func TestRunLint_WarningOnlyIsNonFatal(t *testing.T) {
+	out := "Warning: terraform required_version attribute is required (terraform_required_version)\n"
+	runner := &mockTflint{output: out, exitCode: 1}
+	res, err := RunLint(context.Background(), runner, "/tmp", false)
+	if err != nil {
+		t.Errorf("warnings should be non-fatal, got error: %v", err)
+	}
+	if res.Issues != 1 {
+		t.Errorf("want Issues=1, got %d", res.Issues)
 	}
 }
 
 func TestRunLint_ErrorContainsOutput(t *testing.T) {
-	out := "[warning] Deprecated resource type (aws_deprecated)\n"
+	out := "Error: Deprecated resource type (some_rule)\n"
 	runner := &mockTflint{output: out, exitCode: 1}
 	_, err := RunLint(context.Background(), runner, "/tmp", false)
 	if err == nil {
@@ -65,20 +77,22 @@ func TestRunLint_ErrorContainsOutput(t *testing.T) {
 
 func TestCountIssues_MultipleFindings(t *testing.T) {
 	output := `
-[error] Missing required attribute (rule1)
-[warning] Resource type deprecated (rule2)
-[notice] Use newer syntax (rule3)
+Error: Missing required attribute (rule1)
+Warning: Resource type deprecated (rule2)
 Some other line
 `
-	count := countIssues(output)
-	if count != 3 {
-		t.Errorf("want 3 issues, got %d", count)
+	errs, warns := countIssues(output)
+	if errs != 1 {
+		t.Errorf("want 1 error, got %d", errs)
+	}
+	if warns != 1 {
+		t.Errorf("want 1 warning, got %d", warns)
 	}
 }
 
 func TestCountIssues_Clean(t *testing.T) {
-	count := countIssues("tflint: No issues found.\n")
-	if count != 0 {
-		t.Errorf("want 0 issues, got %d", count)
+	errs, warns := countIssues("1 issue(s) found:\n")
+	if errs != 0 || warns != 0 {
+		t.Errorf("want 0 errors and 0 warnings, got %d/%d", errs, warns)
 	}
 }
