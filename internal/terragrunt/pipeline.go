@@ -79,5 +79,27 @@ func Run(files []*refine.ParsedFile, opts Options) error {
 		}
 	}
 
+	// 4. Remove the flat .tf files from outputDir root — they are now in
+	// module/ and having them in the root would confuse terraform/terragrunt.
+	if err := removeRootTFFiles(opts.OutputDir); err != nil {
+		return fmt.Errorf("cleaning root .tf files: %w", err)
+	}
+
+	return nil
+}
+
+// removeRootTFFiles deletes all *.tf files directly inside dir (non-recursive).
+// These are the original refine-stage outputs that have been superseded by the
+// files written into module/.
+func removeRootTFFiles(dir string) error {
+	entries, err := filepath.Glob(filepath.Join(dir, "*.tf"))
+	if err != nil {
+		return err
+	}
+	for _, path := range entries {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("removing %s: %w", filepath.Base(path), err)
+		}
+	}
 	return nil
 }

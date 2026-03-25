@@ -85,6 +85,27 @@ provider "azurerm" {
 	return dir, files
 }
 
+func TestRun_NoDuplicateTFFilesInRoot(t *testing.T) {
+	_, files := minimalRefinedModule(t)
+	outDir := t.TempDir()
+
+	if err := terragrunt.Run(files, terragrunt.Options{
+		OutputDir:    outDir,
+		Environments: []string{"prod"},
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// No *.tf files should exist directly in outDir — they belong in module/.
+	entries, err := filepath.Glob(filepath.Join(outDir, "*.tf"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if len(entries) > 0 {
+		t.Errorf("found unexpected .tf files in output root: %v", entries)
+	}
+}
+
 func TestRun_CreatesModuleDir(t *testing.T) {
 	_, files := minimalRefinedModule(t)
 	outDir := t.TempDir()
