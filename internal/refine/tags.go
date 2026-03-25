@@ -96,8 +96,10 @@ const CommonTagsLocalName = "common_tags"
 //
 // Returns the count of resource blocks whose tags were normalised.
 func NormaliseTags(files []*ParsedFile, localsFile *ParsedFile, tagKeys ...string) int {
+	// nil  → use StandardTagKeys (default, no --tag-keys flag supplied)
+	// non-nil (even empty) → use as-is (e.g. --no-tags passes []string{})
 	keys := StandardTagKeys
-	if len(tagKeys) > 0 {
+	if tagKeys != nil {
 		keys = tagKeys
 	}
 	injectCommonTagsLocal(localsFile, keys)

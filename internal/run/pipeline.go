@@ -54,10 +54,8 @@ type Options struct {
 
 	// ─── Tags ────────────────────────────────────────────────────────────────
 	// CommonTagKeys overrides the default tag keys in local.common_tags.
-	// Defaults to refine.StandardTagKeys when nil.
+	// nil → StandardTagKeys; []string{} → empty common_tags.
 	CommonTagKeys []string
-	// SkipTags disables tag normalisation entirely.
-	SkipTags bool
 
 	// ─── Enrichment ──────────────────────────────────────────────────────────
 	Enrich      bool
@@ -163,7 +161,6 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		OutputDir:     refinedDir,
 		ResourceGroup: opts.ResourceGroup,
 		CommonTagKeys: opts.CommonTagKeys,
-		SkipTags:      opts.SkipTags,
 		SkipLint:      opts.SkipLint || opts.Mode == "terragrunt",
 		SkipDocs:      opts.SkipDocs,
 	})

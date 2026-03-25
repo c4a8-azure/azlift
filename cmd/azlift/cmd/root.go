@@ -83,3 +83,17 @@ func notImplemented(cmd *cobra.Command, _ []string) error {
 	Log.Info("not yet implemented", "command", cmd.CommandPath())
 	return nil
 }
+
+// resolveTagKeys returns the effective CommonTagKeys value for refine.Options:
+//   - noTags=true  → []string{} (empty common_tags, existing resource tags preserved)
+//   - keys non-empty → keys (user-supplied override)
+//   - otherwise → nil (refine will use StandardTagKeys)
+func resolveTagKeys(keys []string, noTags bool) []string {
+	if noTags {
+		return []string{}
+	}
+	if len(keys) > 0 {
+		return keys
+	}
+	return nil
+}

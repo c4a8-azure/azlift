@@ -21,10 +21,9 @@ type Options struct {
 	// terraform.tf when the aztfexport input omits it. Defaults to ">= 1.10".
 	MinTerraformVersion string
 	// CommonTagKeys overrides the default set of keys injected into
-	// local.common_tags. When nil or empty, StandardTagKeys is used.
+	// local.common_tags. nil → StandardTagKeys; []string{} → empty common_tags
+	// (preserves existing resource tags but injects no standard keys).
 	CommonTagKeys []string
-	// SkipTags disables tag normalisation entirely when true.
-	SkipTags bool
 	// SkipLint bypasses the tflint pass when true.
 	SkipLint bool
 	// SkipDocs bypasses terraform-docs generation when true.
@@ -88,10 +87,8 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return result, fmt.Errorf("extracting variables: %w", err)
 	}
 
-	// 3. Tag normalisation (skipped when SkipTags is set).
-	if !opts.SkipTags {
-		NormaliseTags(files, localsFile, opts.CommonTagKeys...)
-	}
+	// 3. Tag normalisation. nil CommonTagKeys → StandardTagKeys; []string{} → empty common_tags.
+	NormaliseTags(files, localsFile, opts.CommonTagKeys...)
 
 	// 4. Group resource blocks into topic files.
 	grouped := GroupResources(files, opts.OutputDir)

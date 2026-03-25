@@ -73,8 +73,7 @@ func runRefine(cmd *cobra.Command, _ []string) error {
 		OutputDir:           outputDir,
 		ResourceGroup:       rg,
 		MinTerraformVersion: tfVersion,
-		CommonTagKeys:       tagKeys,
-		SkipTags:            noTags,
+		CommonTagKeys:       resolveTagKeys(tagKeys, noTags),
 		SkipLint:            skipLint || mode == "terragrunt",
 		SkipDocs:            skipDocs,
 	})
