@@ -27,10 +27,14 @@ func prepareDir(dir string) error {
 
 // copyDirContents copies all regular files from src into dst, preserving the
 // relative directory structure. dst must already exist.
+// Files listed in neverCommitFiles are silently skipped.
 func copyDirContents(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		if !info.IsDir() && neverCommitFiles[filepath.Base(path)] {
+			return nil // never copy state files into the repo
 		}
 		rel, err := filepath.Rel(src, path)
 		if err != nil {

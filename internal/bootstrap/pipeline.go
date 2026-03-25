@@ -348,6 +348,11 @@ func initRepo(
 		return fmt.Errorf("generating bootstrap module: %w", err)
 	}
 
+	// .gitignore — written before git add so state and plan files are never staged.
+	if err := WriteGitignore(repoDir); err != nil {
+		return fmt.Errorf("writing .gitignore: %w", err)
+	}
+
 	// backend.tf: always write placeholders in the initial commit.
 	// Same-tenant: overwritten with real values after state storage is provisioned.
 	// Cross-tenant: placeholder stays; operator fills in after applying bootstrap/.
