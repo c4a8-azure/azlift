@@ -31,6 +31,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Abort early if the remote backend has not been activated yet.
+      # The bootstrap stage commits a placeholder backend.tf to main and opens
+      # a PR (chore/activate-backend) with the real storage account name.
+      # Until that PR is merged the workflow cannot reach the backend.
+      - name: Check backend is activated
+        run: |
+          if grep -qE 'FILL_IN|<STORAGE_ACCOUNT>' backend.tf 2>/dev/null; then
+            echo "::error title=Backend not activated::backend.tf still contains placeholder values."
+            echo "::error::Merge the 'chore/activate-backend' pull request to configure"
+            echo "::error::the remote backend before drift detection can run."
+            exit 1
+          fi
+
       - name: Azure login
         uses: azure/login@v2
         with:

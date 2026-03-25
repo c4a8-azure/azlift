@@ -14,6 +14,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check backend is activated
+        run: |
+          if grep -qE 'FILL_IN|<STORAGE_ACCOUNT>' backend.tf 2>/dev/null; then
+            echo "::error title=Backend not activated::backend.tf still contains placeholder values."
+            echo "::error::Merge the 'chore/activate-backend' pull request first."
+            exit 1
+          fi
+
       - name: Azure login
         uses: azure/login@v2
         with:
