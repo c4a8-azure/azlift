@@ -99,6 +99,39 @@ resource "azurerm_resource_group" "rg" {
 	}
 }
 
+func TestNormaliseTags_SkipsNoTagsResources(t *testing.T) {
+	locals := makeLocalsFile(t, `locals {}`)
+	files := parseHCL(t, `
+resource "azurerm_subnet" "snet" {
+  name                 = "snet-prod"
+  resource_group_name  = "rg-prod"
+  virtual_network_name = "vnet-prod"
+  address_prefixes     = ["10.0.1.0/24"]
+}
+resource "azurerm_storage_container" "container" {
+  name                 = "tfstate"
+  storage_account_name = "stprod"
+}
+resource "azurerm_virtual_network_peering" "peer" {
+  name                      = "peer-to-hub"
+  resource_group_name       = "rg-prod"
+  virtual_network_name      = "vnet-prod"
+  remote_virtual_network_id = "/subscriptions/x/resourceGroups/rg-hub/providers/Microsoft.Network/virtualNetworks/vnet-hub"
+}
+resource "azurerm_storage_account_queue_properties" "props" {
+  storage_account_id = "/subscriptions/x/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/st"
+}
+`)
+	count := NormaliseTags(files, locals)
+	if count != 0 {
+		t.Errorf("want 0 normalised (all resources are no-tags types), got %d", count)
+	}
+	out := string(files[0].File.Bytes())
+	if strings.Contains(out, "merge(local.common_tags") {
+		t.Errorf("no-tags resource types must not get a tags attribute injected:\n%s", out)
+	}
+}
+
 func TestNormaliseTags_StandardKeysStripped(t *testing.T) {
 	locals := makeLocalsFile(t, `locals {}`)
 	files := parseHCL(t, `
