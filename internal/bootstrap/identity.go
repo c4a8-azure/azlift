@@ -21,6 +21,7 @@ type ManagedIdentity struct {
 
 // MIName derives the MI resource name for an environment + role combination.
 // Pattern: mi-<repo-slug>-<env>-<role>
+// These names are passed to Invoke-AzBootstrap / Add-AzBootstrapEnvironment.
 func MIName(repoName, environment, role string) string {
 	slug := sanitiseRepoName(repoName)
 	return fmt.Sprintf("mi-%s-%s-%s", slug, environment, role)

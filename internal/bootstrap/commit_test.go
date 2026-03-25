@@ -47,11 +47,10 @@ func TestWriteAzBootstrapConfig_CreatesFile(t *testing.T) {
 		t.Fatalf("reading .azbootstrap.jsonc: %v", err)
 	}
 
-	out := string(data)
-	if !strings.Contains(out, "sub-123") {
+	if !strings.Contains(string(data), "sub-123") {
 		t.Error("expected subscription ID in .azbootstrap.jsonc")
 	}
-	if !strings.Contains(out, "tenant-456") {
+	if !strings.Contains(string(data), "tenant-456") {
 		t.Error("expected tenant ID in .azbootstrap.jsonc")
 	}
 }
