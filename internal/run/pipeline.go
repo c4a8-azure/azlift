@@ -210,7 +210,10 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	// Terragrunt layout (optional).
 	if opts.Mode == "terragrunt" {
 		log.Info("[REFINE] generating Terragrunt layout")
-		if err := terragrunt.Run(refineResult.Files, terragrunt.DefaultOptions(refinedDir)); err != nil {
+		tgOpts := terragrunt.DefaultOptions(refinedDir)
+		tgOpts.Environments = opts.Environments
+		tgOpts.SourceResourceGroup = opts.ResourceGroup
+		if err := terragrunt.Run(refineResult.Files, tgOpts); err != nil {
 			return result, fmt.Errorf("terragrunt layout: %w", err)
 		}
 		log.Info("[REFINE] Terragrunt layout written")
