@@ -77,9 +77,3 @@ func initLogger() error {
 	})
 	return nil
 }
-
-// notImplemented is a shared RunE body for stub commands.
-func notImplemented(cmd *cobra.Command, _ []string) error {
-	Log.Info("not yet implemented", "command", cmd.CommandPath())
-	return nil
-}
