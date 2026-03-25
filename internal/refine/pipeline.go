@@ -23,6 +23,8 @@ type Options struct {
 	// CommonTagKeys overrides the default set of keys injected into
 	// local.common_tags. When nil or empty, StandardTagKeys is used.
 	CommonTagKeys []string
+	// SkipTags disables tag normalisation entirely when true.
+	SkipTags bool
 	// SkipLint bypasses the tflint pass when true.
 	SkipLint bool
 	// SkipDocs bypasses terraform-docs generation when true.
@@ -86,9 +88,10 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return result, fmt.Errorf("extracting variables: %w", err)
 	}
 
-	// 3. Tag normalisation — always runs so every resource gets
-	// merge(local.common_tags, {...}) regardless of whether --enrich is used.
-	NormaliseTags(files, localsFile, opts.CommonTagKeys...)
+	// 3. Tag normalisation (skipped when SkipTags is set).
+	if !opts.SkipTags {
+		NormaliseTags(files, localsFile, opts.CommonTagKeys...)
+	}
 
 	// 4. Group resource blocks into topic files.
 	grouped := GroupResources(files, opts.OutputDir)

@@ -61,7 +61,8 @@ Example (cross-tenant):
 	cmd.Flags().String("mi-resource-group", "", "RG for Managed Identities (defaults to --resource-group)")
 
 	// ── Tags ──────────────────────────────────────────────────────────────────
-	cmd.Flags().StringSlice("tag-keys", nil, "Tag keys to inject into local.common_tags on every resource (default: "+strings.Join(refine.StandardTagKeys, ",")+") ")
+	cmd.Flags().StringSlice("tag-keys", nil, "Tag keys to inject into local.common_tags on every resource (default: "+strings.Join(refine.StandardTagKeys, ",")+")")
+	cmd.Flags().Bool("no-tags", false, "Disable tag normalisation entirely")
 
 	// ── Output ────────────────────────────────────────────────────────────────
 	cmd.Flags().String("mode", "modules", "Output mode: modules or terragrunt")
@@ -104,6 +105,7 @@ func runPipeline(cmd *cobra.Command, _ []string) error {
 	skipLint, _ := cmd.Flags().GetBool("skip-lint")
 	skipDocs, _ := cmd.Flags().GetBool("skip-docs")
 	tagKeys, _ := cmd.Flags().GetStringSlice("tag-keys")
+	noTags, _ := cmd.Flags().GetBool("no-tags")
 
 	sub, _ := cmd.Root().PersistentFlags().GetString("subscription")
 	if sub == "" {
@@ -137,6 +139,7 @@ func runPipeline(cmd *cobra.Command, _ []string) error {
 		WorkDir:            workDir,
 		WorkflowsDir:       workflowsDir,
 		CommonTagKeys:      tagKeys,
+		SkipTags:           noTags,
 		Enrich:             doEnrich,
 		FixSecurity:        fixSecurity,
 		DryRun:             dryRun,
