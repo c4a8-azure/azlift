@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/anthropics/anthropic-sdk-go/option"
 
@@ -24,6 +25,8 @@ type Options struct {
 	SkipSecurity bool
 	// SkipDescriptions disables AI description generation.
 	SkipDescriptions bool
+	// SkipAnalysis disables AI architecture analysis generation.
+	SkipAnalysis bool
 	// Log is an optional structured logger for progress output.
 	Log *slog.Logger
 }
@@ -36,6 +39,8 @@ type RunResult struct {
 	SecurityFindings []SecurityFinding
 	// DescriptionsEnriched is the number of files enriched with AI descriptions.
 	DescriptionsEnriched int
+	// AnalysisFile is the path to the generated ANALYSIS.md, or "" when skipped.
+	AnalysisFile string
 }
 
 // Run executes the enrichment pipeline against the provided files.
@@ -91,6 +96,32 @@ func Run(ctx context.Context, files []*refine.ParsedFile, localsFile *refine.Par
 			}
 			result.DescriptionsEnriched = enriched
 			log.Info(fmt.Sprintf("enrich: AI descriptions — %d file(s) enriched", enriched))
+		}
+	}
+
+	// 5. AI architecture analysis (requires API key).
+	if !opts.SkipAnalysis {
+		if opts.APIKey == "" {
+			log.Debug("enrich: skipping AI architecture analysis — ANTHROPIC_API_KEY not set")
+		} else {
+			log.Info(fmt.Sprintf("enrich: generating architecture analysis with AI model (%s)", modelName(opts)))
+			client, err := buildClient(opts)
+			if err != nil {
+				return result, fmt.Errorf("initialising AI client for analysis: %w", err)
+			}
+			analysisContent, err := GenerateAnalysis(ctx, client, files, log)
+			if err != nil {
+				return result, fmt.Errorf("AI architecture analysis: %w", err)
+			}
+			if analysisContent != "" {
+				outputDir := filepath.Dir(files[0].Path)
+				analysisFile, err := WriteAnalysis(outputDir, analysisContent)
+				if err != nil {
+					return result, fmt.Errorf("writing architecture analysis: %w", err)
+				}
+				result.AnalysisFile = analysisFile
+				log.Info("enrich: architecture analysis written", "path", analysisFile)
+			}
 		}
 	}
 

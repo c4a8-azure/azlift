@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -37,6 +38,9 @@ type AztfexportRunner struct {
 	// Binary is the path or name of the aztfexport executable.
 	// Defaults to "aztfexport" (resolved via PATH).
 	Binary string
+	// ExtraEnv is a list of "KEY=VALUE" pairs appended to the process environment.
+	// Use this to inject ARM_USE_AZUREAD=true etc. without mutating os.Environ.
+	ExtraEnv []string
 }
 
 // Run implements Runner.
@@ -47,6 +51,9 @@ func (r *AztfexportRunner) Run(ctx context.Context, args []string, logLine func(
 	}
 
 	cmd := exec.CommandContext(ctx, bin, args...) //nolint:gosec // binary is a validated tool path
+	if len(r.ExtraEnv) > 0 {
+		cmd.Env = append(os.Environ(), r.ExtraEnv...)
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

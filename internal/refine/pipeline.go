@@ -3,6 +3,7 @@ package refine
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,9 @@ type Result struct {
 	Lint LintResult
 	// Docs holds the outcome of the terraform-docs pass.
 	Docs DocsResult
+	// StateCopied is true when terraform.tfstate was found in InputDir and
+	// copied to OutputDir so the bootstrap stage can locate it there.
+	StateCopied bool
 }
 
 // Run executes the full refine pipeline in modules mode:
@@ -50,8 +54,9 @@ type Result struct {
 //  4. Group resource blocks into topic files.
 //  5. Generate backend.tf, terraform.tf, providers.tf.
 //  6. Write all files to OutputDir.
-//  7. Run tflint (unless SkipLint).
-//  8. Run terraform-docs (unless SkipDocs).
+//  7. Copy terraform.tfstate from InputDir → OutputDir (if present).
+//  8. Run tflint (unless SkipLint).
+//  9. Run terraform-docs (unless SkipDocs).
 func Run(ctx context.Context, opts Options) (Result, error) {
 	var result Result
 
@@ -124,7 +129,18 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	result.Files = allFiles
 
-	// 6. tflint.
+	// 6. Carry terraform.tfstate forward from the export dir so the bootstrap
+	// stage can locate it at OutputDir/terraform.tfstate without needing an
+	// explicit --state-dir flag.
+	srcState := filepath.Join(opts.InputDir, "terraform.tfstate")
+	dstState := filepath.Join(opts.OutputDir, "terraform.tfstate")
+	if copied, copyErr := copyFileIfExists(srcState, dstState); copyErr != nil {
+		return result, fmt.Errorf("copying terraform.tfstate: %w", copyErr)
+	} else {
+		result.StateCopied = copied
+	}
+
+	// 8. tflint.
 	lintRunner := opts.LintRunner
 	if lintRunner == nil {
 		lintRunner = &ExecTflintRunner{}
@@ -135,7 +151,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	result.Lint = lintResult
 
-	// 7. terraform-docs.
+	// 9. terraform-docs.
 	docsRunner := opts.DocsRunner
 	if docsRunner == nil {
 		docsRunner = &ExecTerraformDocsRunner{}
@@ -148,6 +164,30 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	result.Docs = docsResult
 
 	return result, nil
+}
+
+// copyFileIfExists copies src to dst when src exists. Returns (true, nil) on
+// success, (false, nil) when src is absent, or (false, err) on failure.
+func copyFileIfExists(src, dst string) (bool, error) {
+	in, err := os.Open(src) //nolint:gosec
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst) //nolint:gosec
+	if err != nil {
+		return false, err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // exportParentHint checks whether dir looks like an aztfexport parent directory

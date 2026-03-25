@@ -42,6 +42,39 @@ var permanentPatterns = []string{
 	"does not exist",
 }
 
+// azureADAuthPatterns are substrings that indicate the storage backend requires
+// Azure AD authentication (shared-key access disabled on the storage account).
+// When these appear in a failure, the run should be retried with ARM_USE_AZUREAD
+// and ARM_STORAGE_USE_AZUREAD set to true.
+var azureADAuthPatterns = []string{
+	"KeyBasedAuthenticationNotPermitted",
+	"Key based authentication is not permitted",
+	"SharedKeyLite",
+	"Shared key access is disabled",
+	"AuthorizationPermissionMismatch",
+	"storage: service returned error: StatusCode=403",
+	"disallowSharedKeyAccess",
+}
+
+// IsAzureADAuthError returns true when the error and output indicate that the
+// storage backend rejected shared-key auth and Azure AD auth should be used.
+func IsAzureADAuthError(errMsg, output string) bool {
+	combined := errMsg + "\n" + output
+	for _, p := range azureADAuthPatterns {
+		if strings.Contains(combined, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// AzureADEnv are the environment variable pairs that enable Azure AD
+// authentication for both the azurerm provider and its storage backend.
+var AzureADEnv = []string{
+	"ARM_USE_AZUREAD=true",
+	"ARM_STORAGE_USE_AZUREAD=true",
+}
+
 // RetryRunner wraps a Runner with exponential backoff retry logic.
 type RetryRunner struct {
 	Inner  Runner

@@ -41,6 +41,7 @@ Example (cross-tenant):
 	}
 
 	cmd.Flags().String("input-dir", "./refined", "Directory containing refined Terraform output to commit")
+	cmd.Flags().String("state-dir", "", "Directory containing terraform.tfstate from aztfexport (defaults to --input-dir)")
 	cmd.Flags().String("repo-name", "", "Name of the Git repository to create (required)")
 	cmd.Flags().String("org", "", "GitHub organisation (required)")
 	cmd.Flags().StringSlice("environments", []string{"prod", "dev"}, "Deployment environments (comma-separated)")
@@ -60,6 +61,7 @@ Example (cross-tenant):
 
 func runBootstrap(cmd *cobra.Command, _ []string) error {
 	inputDir, _ := cmd.Flags().GetString("input-dir")
+	stateDir, _ := cmd.Flags().GetString("state-dir")
 	repoName, _ := cmd.Flags().GetString("repo-name")
 	org, _ := cmd.Flags().GetString("org")
 	envs, _ := cmd.Flags().GetStringSlice("environments")
@@ -88,6 +90,7 @@ func runBootstrap(cmd *cobra.Command, _ []string) error {
 		RepoOrg:            org,
 		Environments:       envs,
 		InputDir:           inputDir,
+		TfStateDir:         stateDir,
 		Location:           location,
 		ResourceGroups:     resourceGroups,
 		MIResourceGroup:    miRG,

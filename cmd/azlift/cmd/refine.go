@@ -76,6 +76,9 @@ func runRefine(cmd *cobra.Command, _ []string) error {
 	}
 
 	log.Info(fmt.Sprintf("wrote %d files to %s", len(result.Files), outputDir))
+	if result.StateCopied {
+		log.Info("terraform.tfstate copied to output directory for bootstrap stage")
+	}
 
 	if result.Lint.Skipped {
 		log.Info("lint skipped")
@@ -118,7 +121,9 @@ func runRefine(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("enrichment: %w", err)
 		}
 
-		_ = enrichResult // progress already logged inside enrich.Run
+		if enrichResult.AnalysisFile != "" {
+			log.Info(fmt.Sprintf("architecture analysis: %s (injected into README.md)", enrichResult.AnalysisFile))
+		}
 
 		// Re-write enriched files to disk.
 		for _, pf := range result.Files {
