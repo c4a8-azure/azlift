@@ -56,7 +56,7 @@ func TestGenerateVersions_DefaultPins(t *testing.T) {
 	out := string(pf.File.Bytes())
 	for _, want := range []string{
 		"required_version",
-		">= 1.5.0",
+		">= 1.10",
 		"required_providers",
 		"hashicorp/azurerm",
 		"~> 4.0",

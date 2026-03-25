@@ -62,12 +62,21 @@ var DefaultProviderPins = []ProviderPin{
 	{Source: "azure/azapi", Version: "~> 2.0"},
 }
 
+// DefaultMinTerraformVersion is the required_version injected when aztfexport
+// omits it and no override is provided via Options.MinTerraformVersion.
+const DefaultMinTerraformVersion = ">= 1.10"
+
 // ExtractTerraformBlock finds the terraform {} block from the parsed input
 // files, strips any embedded backend {} sub-block (which lives in backend.tf),
 // and writes the result as terraform.tf in outputDir.
+// minVersion is injected as required_version when the input block omits it;
+// pass "" to use DefaultMinTerraformVersion.
 // Returns nil when no terraform block is present in the input — the caller
 // should fall back to GenerateVersions in that case.
-func ExtractTerraformBlock(outputDir string, files []*ParsedFile) (*ParsedFile, error) {
+func ExtractTerraformBlock(outputDir string, files []*ParsedFile, minVersion string) (*ParsedFile, error) {
+	if minVersion == "" {
+		minVersion = DefaultMinTerraformVersion
+	}
 	for _, pf := range files {
 		for _, block := range pf.File.Body().Blocks() {
 			if block.Type() != "terraform" {
@@ -91,7 +100,7 @@ func ExtractTerraformBlock(outputDir string, files []*ParsedFile) (*ParsedFile, 
 					}
 				}
 				if outer.Body().GetAttribute("required_version") == nil {
-					outer.Body().SetAttributeValue("required_version", cty.StringVal(">= 1.5.0"))
+					outer.Body().SetAttributeValue("required_version", cty.StringVal(minVersion))
 				}
 			}
 			out := NewFile(filepath.Join(outputDir, "terraform.tf"))
@@ -108,7 +117,7 @@ func ExtractTerraformBlock(outputDir string, files []*ParsedFile) (*ParsedFile, 
 // prior aztfexport run).
 func GenerateVersions(outputDir string, minTerraformVersion string, pins []ProviderPin) (*ParsedFile, error) {
 	if minTerraformVersion == "" {
-		minTerraformVersion = ">= 1.5.0"
+		minTerraformVersion = DefaultMinTerraformVersion
 	}
 	if len(pins) == 0 {
 		pins = DefaultProviderPins

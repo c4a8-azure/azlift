@@ -34,6 +34,7 @@ auto-remediations to the output files.`,
 	cmd.Flags().String("output-dir", "./refined", "Directory to write refined Terraform output")
 	cmd.Flags().String("mode", "modules", "Output mode: modules or terragrunt")
 	cmd.Flags().String("resource-group", "", "Resource group name (used for backend state key)")
+	cmd.Flags().String("terraform-version", "", "Minimum Terraform version constraint injected when the input omits required_version (default: \""+refine.DefaultMinTerraformVersion+"\")")
 	cmd.Flags().Bool("enrich", false, "Run full enrichment pass (lifecycle, security, tags, AI descriptions)")
 	cmd.Flags().Bool("fix-security", false, "Auto-remediate safe security anti-patterns in the output")
 	cmd.Flags().Bool("skip-lint", false, "Skip the tflint pass")
@@ -47,6 +48,7 @@ func runRefine(cmd *cobra.Command, _ []string) error {
 	outputDir, _ := cmd.Flags().GetString("output-dir")
 	mode, _ := cmd.Flags().GetString("mode")
 	rg, _ := cmd.Flags().GetString("resource-group")
+	tfVersion, _ := cmd.Flags().GetString("terraform-version")
 	doEnrich, _ := cmd.Flags().GetBool("enrich")
 	fixSecurity, _ := cmd.Flags().GetBool("fix-security")
 	skipLint, _ := cmd.Flags().GetBool("skip-lint")
@@ -62,11 +64,12 @@ func runRefine(cmd *cobra.Command, _ []string) error {
 
 	// Run the core modules-mode pipeline.
 	result, err := refine.Run(cmd.Context(), refine.Options{
-		InputDir:      inputDir,
-		OutputDir:     outputDir,
-		ResourceGroup: rg,
-		SkipLint:      skipLint || mode == "terragrunt",
-		SkipDocs:      skipDocs,
+		InputDir:            inputDir,
+		OutputDir:           outputDir,
+		ResourceGroup:       rg,
+		MinTerraformVersion: tfVersion,
+		SkipLint:            skipLint || mode == "terragrunt",
+		SkipDocs:            skipDocs,
 	})
 	if err != nil {
 		return err

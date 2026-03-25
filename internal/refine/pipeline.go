@@ -16,6 +16,9 @@ type Options struct {
 	OutputDir string
 	// ResourceGroup is used to derive the backend state key.
 	ResourceGroup string
+	// MinTerraformVersion overrides the required_version injected into
+	// terraform.tf when the aztfexport input omits it. Defaults to ">= 1.10".
+	MinTerraformVersion string
 	// SkipLint bypasses the tflint pass when true.
 	SkipLint bool
 	// SkipDocs bypasses terraform-docs generation when true.
@@ -88,12 +91,12 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return result, fmt.Errorf("generating backend.tf: %w", err)
 	}
 
-	versionsFile, err := ExtractTerraformBlock(opts.OutputDir, files)
+	versionsFile, err := ExtractTerraformBlock(opts.OutputDir, files, opts.MinTerraformVersion)
 	if err != nil {
 		return result, fmt.Errorf("extracting terraform.tf: %w", err)
 	}
 	if versionsFile == nil {
-		versionsFile, err = GenerateVersions(opts.OutputDir, "", nil)
+		versionsFile, err = GenerateVersions(opts.OutputDir, opts.MinTerraformVersion, nil)
 		if err != nil {
 			return result, fmt.Errorf("generating terraform.tf: %w", err)
 		}
