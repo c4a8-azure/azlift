@@ -240,6 +240,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		RepoName:           opts.RepoName,
 		RepoOrg:            opts.RepoOrg,
 		Environments:       opts.Environments,
+		Mode:               opts.Mode,
 		InputDir:           refinedDir,
 		TfStateDir:         rgDir,
 		Location:           opts.Location,

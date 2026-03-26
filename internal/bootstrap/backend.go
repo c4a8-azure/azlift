@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // BackendConfig holds the values for generating backend.tf.
@@ -66,6 +67,26 @@ terraform {
 	dest := filepath.Join(repoDir, "backend.tf")
 	if err := os.WriteFile(dest, []byte(content), 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing backend.tf: %w", err)
+	}
+	return nil
+}
+
+// PatchRootHCL replaces the FILL_IN_BACKEND_RG and FILL_IN_STORAGE_ACCOUNT
+// placeholder values in the Terragrunt root.hcl with the real provisioned values.
+// Used in terragrunt mode instead of writing a separate backend.tf.
+func PatchRootHCL(repoDir string, cfg BackendConfig) error {
+	rootHCLPath := filepath.Join(repoDir, "root.hcl")
+	raw, err := os.ReadFile(rootHCLPath) //nolint:gosec
+	if err != nil {
+		return fmt.Errorf("reading root.hcl: %w", err)
+	}
+
+	content := string(raw)
+	content = strings.ReplaceAll(content, "FILL_IN_BACKEND_RG", cfg.ResourceGroupName)
+	content = strings.ReplaceAll(content, "FILL_IN_STORAGE_ACCOUNT", cfg.StorageAccountName)
+
+	if err := os.WriteFile(rootHCLPath, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("writing root.hcl: %w", err)
 	}
 	return nil
 }
