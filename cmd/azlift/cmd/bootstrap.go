@@ -45,6 +45,10 @@ Example (cross-tenant):
 	cmd.Flags().String("input-dir", "./refined", "Directory containing refined Terraform output to commit")
 	cmd.Flags().String("state-dir", "", "Directory containing terraform.tfstate from aztfexport (defaults to --input-dir)")
 	cmd.Flags().String("mode", "", "Output mode: modules or terragrunt (auto-detected from input-dir when empty)")
+	cmd.Flags().Bool("adopt", false, "Clone and update an existing GitHub repo instead of creating a new one")
+	cmd.Flags().Bool("plan-only", false, "Generate plan workflows only; apply requires manual workflow_dispatch (DR mode)")
+	cmd.Flags().String("source-resource-group", "", "Source RG to export from (generates a scheduled export CI workflow when set)")
+	cmd.Flags().String("export-schedule", "0 2 * * *", "Cron expression for the scheduled export workflow")
 	cmd.Flags().String("repo-name", "", "Name of the Git repository to create (required)")
 	cmd.Flags().String("org", "", "GitHub organisation (required)")
 	cmd.Flags().StringSlice("environments", []string{"prod", "dev"}, "Deployment environments (comma-separated)")
@@ -73,6 +77,10 @@ func runBootstrap(cmd *cobra.Command, _ []string) error {
 			mode = "modules"
 		}
 	}
+	adopt, _ := cmd.Flags().GetBool("adopt")
+	planOnly, _ := cmd.Flags().GetBool("plan-only")
+	sourceRG, _ := cmd.Flags().GetString("source-resource-group")
+	exportSchedule, _ := cmd.Flags().GetString("export-schedule")
 	repoName, _ := cmd.Flags().GetString("repo-name")
 	org, _ := cmd.Flags().GetString("org")
 	envs, _ := cmd.Flags().GetStringSlice("environments")
@@ -93,21 +101,25 @@ func runBootstrap(cmd *cobra.Command, _ []string) error {
 	log.Info(fmt.Sprintf("bootstrapping repo %s/%s (mode: %s)", org, repoName, mode))
 
 	result, err := bootstrap.Run(cmd.Context(), bootstrap.Options{
-		SubscriptionID:     sub,
-		TargetSubscription: targetSub,
-		TargetTenant:       targetTenant,
-		TenantID:           tenantID,
-		RepoName:           repoName,
-		RepoOrg:            org,
-		Mode:               mode,
-		Environments:       envs,
-		InputDir:           inputDir,
-		TfStateDir:         stateDir,
-		Location:           location,
-		ResourceGroups:     resourceGroups,
-		MIResourceGroup:    miRG,
-		WorkflowsDir:       workflowsDir,
-		Log:                Log.Slog(),
+		SubscriptionID:      sub,
+		TargetSubscription:  targetSub,
+		TargetTenant:        targetTenant,
+		TenantID:            tenantID,
+		RepoName:            repoName,
+		RepoOrg:             org,
+		Mode:                mode,
+		AdoptExisting:       adopt,
+		PlanOnly:            planOnly,
+		SourceResourceGroup: sourceRG,
+		ExportSchedule:      exportSchedule,
+		Environments:        envs,
+		InputDir:            inputDir,
+		TfStateDir:          stateDir,
+		Location:            location,
+		ResourceGroups:      resourceGroups,
+		MIResourceGroup:     miRG,
+		WorkflowsDir:        workflowsDir,
+		Log:                 Log.Slog(),
 	})
 	if err != nil {
 		return err

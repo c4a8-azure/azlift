@@ -23,6 +23,16 @@ type Config struct {
 	// workflow templates — terragrunt templates run commands from envs/<env>/
 	// and check root.hcl instead of backend.tf.
 	Mode string
+	// PlanOnly, when true, replaces the push-triggered apply workflow with a
+	// workflow_dispatch-only emergency apply. Used for cross-tenant DR repos
+	// where automatic apply is never desired.
+	PlanOnly bool
+	// SourceResourceGroup, when non-empty, generates an export-scheduled.yml
+	// workflow that exports from the source tenant on a cron schedule.
+	SourceResourceGroup string
+	// ExportSchedule is the cron expression for the scheduled export workflow.
+	// Defaults to "0 2 * * *" (daily at 02:00 UTC).
+	ExportSchedule string
 	// CustomDir, when non-empty, reads .yml files from this directory instead
 	// of the embedded templates. Files must be named plan.yml.tmpl and
 	// apply.yml.tmpl and use the same {{.Environment}} template variable.
@@ -32,10 +42,29 @@ type Config struct {
 // Render returns a map of filename → rendered YAML content for all workflow
 // files derived from cfg. Files are named plan-{env}.yml, apply-{env}.yml,
 // and drift-{env}.yml.
+//
+// When cfg.PlanOnly is true, the apply workflow is replaced with an
+// emergency-only variant (workflow_dispatch, no push trigger).
+//
+// When cfg.SourceResourceGroup is non-empty, a single export-scheduled.yml
+// is also included.
 func Render(cfg Config) (map[string][]byte, error) {
-	planName, applyName, driftName := "plan.yml.tmpl", "apply.yml.tmpl", "drift.yml.tmpl"
-	if cfg.Mode == "terragrunt" {
-		planName, applyName, driftName = "plan-tg.yml.tmpl", "apply-tg.yml.tmpl", "drift-tg.yml.tmpl"
+	isTG := cfg.Mode == "terragrunt"
+
+	planName := "plan.yml.tmpl"
+	driftName := "drift.yml.tmpl"
+	applyName := "apply.yml.tmpl"
+	if isTG {
+		planName = "plan-tg.yml.tmpl"
+		driftName = "drift-tg.yml.tmpl"
+		applyName = "apply-tg.yml.tmpl"
+	}
+	if cfg.PlanOnly {
+		if isTG {
+			applyName = "apply-tg-emergency.yml.tmpl"
+		} else {
+			applyName = "apply-emergency.yml.tmpl"
+		}
 	}
 
 	planTmpl, err := loadTemplate(cfg.CustomDir, planName)
@@ -51,7 +80,7 @@ func Render(cfg Config) (map[string][]byte, error) {
 		return nil, fmt.Errorf("loading drift template: %w", err)
 	}
 
-	files := make(map[string][]byte, len(cfg.Environments)*3)
+	files := make(map[string][]byte, len(cfg.Environments)*3+1)
 	for _, env := range cfg.Environments {
 		data := struct{ Environment string }{Environment: env}
 
@@ -65,13 +94,41 @@ func Render(cfg Config) (map[string][]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("rendering apply template for %s: %w", env, err)
 		}
-		files[fmt.Sprintf("apply-%s.yml", env)] = applyBytes
+		applyKey := fmt.Sprintf("apply-%s.yml", env)
+		if cfg.PlanOnly {
+			applyKey = fmt.Sprintf("apply-%s-emergency.yml", env)
+		}
+		files[applyKey] = applyBytes
 
 		driftBytes, err := renderTemplate(driftTmpl, data)
 		if err != nil {
 			return nil, fmt.Errorf("rendering drift template for %s: %w", env, err)
 		}
 		files[fmt.Sprintf("drift-%s.yml", env)] = driftBytes
+	}
+
+	// Scheduled export workflow — emitted once (not per-environment).
+	if cfg.SourceResourceGroup != "" {
+		exportTmpl, err := loadTemplate(cfg.CustomDir, "export-scheduled.yml.tmpl")
+		if err != nil {
+			return nil, fmt.Errorf("loading export-scheduled template: %w", err)
+		}
+		schedule := cfg.ExportSchedule
+		if schedule == "" {
+			schedule = "0 2 * * *"
+		}
+		exportData := struct {
+			SourceResourceGroup string
+			ExportSchedule      string
+		}{
+			SourceResourceGroup: cfg.SourceResourceGroup,
+			ExportSchedule:      schedule,
+		}
+		exportBytes, err := renderTemplate(exportTmpl, exportData)
+		if err != nil {
+			return nil, fmt.Errorf("rendering export-scheduled template: %w", err)
+		}
+		files["export-scheduled.yml"] = exportBytes
 	}
 
 	return files, nil
