@@ -1,0 +1,71 @@
+name: "Emergency Apply · {{ .Environment }}"
+
+# ⚠️  EMERGENCY USE ONLY ⚠️
+# This workflow recreates infrastructure in the target tenant.
+# It is NOT triggered automatically — a human must dispatch it manually.
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type EMERGENCY to confirm infrastructure recreation in the target tenant"
+        required: true
+        type: string
+
+jobs:
+  emergency-apply:
+    name: terraform apply (EMERGENCY)
+    runs-on: ubuntu-latest
+    environment: {{ .Environment }}-iac-apply
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Require confirmation
+        run: |
+          if [ "${{ "{{" }} github.event.inputs.confirmation {{ "}}" }}" != "EMERGENCY" ]; then
+            echo "::error::Confirmation not provided. Type EMERGENCY in the confirmation field."
+            exit 1
+          fi
+          echo "::warning::EMERGENCY APPLY confirmed by ${{ "{{" }} github.actor {{ "}}" }} — proceeding."
+
+      - uses: actions/checkout@v4
+
+      - name: Check backend is activated
+        run: |
+          if grep -qE 'FILL_IN|<STORAGE_ACCOUNT>' backend.tf 2>/dev/null; then
+            echo "::error title=Backend not activated::backend.tf still contains placeholder values."
+            exit 1
+          fi
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ "{{" }} vars.AZURE_CLIENT_ID {{ "}}" }}
+          tenant-id: ${{ "{{" }} vars.AZURE_TENANT_ID {{ "}}" }}
+          subscription-id: ${{ "{{" }} vars.AZURE_SUBSCRIPTION_ID {{ "}}" }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        run: terraform init -reconfigure
+
+      - name: Write emergency summary header
+        run: |
+          {
+            echo "## ⚠️ EMERGENCY APPLY — ${{ "{{" }} github.actor {{ "}}" }}"
+            echo ""
+            echo "**Environment:** \`{{ .Environment }}\`"
+            echo "**Triggered at:** $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo "**Run:** [${{ "{{" }} github.run_id {{ "}}" }}](${{ "{{" }} github.server_url {{ "}}" }}/${{ "{{" }} github.repository {{ "}}" }}/actions/runs/${{ "{{" }} github.run_id {{ "}}" }})"
+            echo ""
+            echo "> Infrastructure is being recreated in the target tenant."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Terraform apply
+        run: terraform apply -auto-approve
+        env:
+          ARM_USE_OIDC: "true"
+          ARM_CLIENT_ID: ${{ "{{" }} vars.AZURE_CLIENT_ID {{ "}}" }}
+          ARM_TENANT_ID: ${{ "{{" }} vars.AZURE_TENANT_ID {{ "}}" }}
+          ARM_SUBSCRIPTION_ID: ${{ "{{" }} vars.AZURE_SUBSCRIPTION_ID {{ "}}" }}

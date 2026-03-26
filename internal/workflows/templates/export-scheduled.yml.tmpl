@@ -1,0 +1,133 @@
+name: "IaC Sync from Source"
+
+# Runs aztfexport against the source tenant on a schedule, refines the output,
+# and opens a pull request if anything has changed.
+# Required GitHub secrets (set manually in repo settings):
+#   AZURE_SOURCE_CLIENT_ID       — service principal with Reader on source subscription
+#   AZURE_SOURCE_TENANT_ID       — source Azure AD tenant ID
+#   AZURE_SOURCE_SUBSCRIPTION_ID — source Azure subscription ID
+on:
+  schedule:
+    - cron: '{{ .ExportSchedule }}'
+  workflow_dispatch:
+
+jobs:
+  export:
+    name: export and sync
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+      pull-requests: write
+    env:
+      SOURCE_RG: {{ .SourceResourceGroup }}
+      RAW_DIR: .azlift-sync/raw
+      REFINED_DIR: .azlift-sync/refined
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (source tenant)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ "{{" }} secrets.AZURE_SOURCE_CLIENT_ID {{ "}}" }}
+          tenant-id: ${{ "{{" }} secrets.AZURE_SOURCE_TENANT_ID {{ "}}" }}
+          subscription-id: ${{ "{{" }} secrets.AZURE_SOURCE_SUBSCRIPTION_ID {{ "}}" }}
+
+      - name: Install aztfexport
+        run: |
+          AE_VER=$(curl -s https://api.github.com/repos/Azure/aztfexport/releases/latest \
+            | grep '"tag_name"' | cut -d'"' -f4)
+          curl -sL "https://github.com/Azure/aztfexport/releases/download/${AE_VER}/aztfexport_linux_amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin aztfexport
+
+      - name: Install azlift
+        run: |
+          AL_VER=$(curl -s https://api.github.com/repos/${{ "{{" }} github.repository_owner {{ "}}" }}/azlift/releases/latest \
+            | grep '"tag_name"' | cut -d'"' -f4)
+          if [ -n "$AL_VER" ]; then
+            curl -sL "https://github.com/${{ "{{" }} github.repository_owner {{ "}}" }}/azlift/releases/download/${AL_VER}/azlift_linux_amd64" \
+              -o /usr/local/bin/azlift
+            chmod +x /usr/local/bin/azlift
+          else
+            echo "::warning::No azlift release found — installing via go install"
+            go install github.com/c4a8-azure/azlift/cmd/azlift@latest
+          fi
+
+      - name: Export from source
+        run: |
+          azlift export \
+            --subscription "${{ "{{" }} secrets.AZURE_SOURCE_SUBSCRIPTION_ID {{ "}}" }}" \
+            --resource-group "$SOURCE_RG" \
+            --output-dir "$RAW_DIR"
+        env:
+          ARM_USE_OIDC: "true"
+          ARM_CLIENT_ID: ${{ "{{" }} secrets.AZURE_SOURCE_CLIENT_ID {{ "}}" }}
+          ARM_TENANT_ID: ${{ "{{" }} secrets.AZURE_SOURCE_TENANT_ID {{ "}}" }}
+          ARM_SUBSCRIPTION_ID: ${{ "{{" }} secrets.AZURE_SOURCE_SUBSCRIPTION_ID {{ "}}" }}
+
+      - name: Refine
+        run: |
+          azlift refine \
+            --input-dir "$RAW_DIR/$SOURCE_RG" \
+            --output-dir "$REFINED_DIR" \
+            --skip-lint \
+            --skip-docs
+
+      - name: Check for changes
+        id: diff
+        run: |
+          # Compare refined output against current repo HCL files (exclude generated files).
+          git diff --no-index --quiet \
+            --diff-filter=ACMRD \
+            -- "$REFINED_DIR/" ./ \
+            2>/dev/null || echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Copy refined output into repo
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          # Copy .tf files from refined output, preserving subdirectory structure.
+          find "$REFINED_DIR" -name "*.tf" -o -name "*.hcl" | while read -r f; do
+            rel="${f#$REFINED_DIR/}"
+            mkdir -p "$(dirname "$rel")"
+            cp "$f" "$rel"
+          done
+
+      - name: Open pull request with changes
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ "{{" }} github.token {{ "}}" }}
+        run: |
+          DATE=$(date -u '+%Y-%m-%d')
+          BRANCH="chore/iac-sync-${DATE}"
+
+          git config user.name  "azlift-bot"
+          git config user.email "azlift-bot@noreply"
+
+          # Create or reset the sync branch.
+          git checkout -B "$BRANCH"
+          git add -A
+          git commit -m "chore: IaC sync from $SOURCE_RG — ${DATE}
+
+          Automated export via aztfexport + azlift refine.
+          Source subscription: ${{ "{{" }} secrets.AZURE_SOURCE_SUBSCRIPTION_ID {{ "}}" }}
+          Source resource group: $SOURCE_RG"
+
+          git push origin "$BRANCH" --force
+
+          # Open PR (idempotent — gh will error if PR already open for this branch).
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: IaC sync from $SOURCE_RG — ${DATE}" \
+            --body "Automated IaC capture from source tenant.
+
+**Source RG:** \`$SOURCE_RG\`
+**Date:** ${DATE}
+
+Review the diff and merge when the plan looks correct." \
+            2>/dev/null || gh pr edit "$BRANCH" --body "Updated $(date -u '+%Y-%m-%d %H:%M UTC')"
+
+      - name: No changes detected
+        if: steps.diff.outputs.changed != 'true'
+        run: echo "No infrastructure changes detected — nothing to sync."

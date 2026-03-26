@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -56,6 +57,19 @@ type Options struct {
 	// Mode is "modules" (default) or "terragrunt". Controls the state blob key
 	// and which file is updated when activating the remote backend.
 	Mode string
+	// AdoptExisting, when true, clones the existing GitHub repo instead of
+	// creating a new one. Use for repos that already have OIDC credentials
+	// configured (cross-tenant DR scenario).
+	AdoptExisting bool
+	// PlanOnly, when true, generates plan + emergency apply (workflow_dispatch)
+	// workflows only. No push-triggered apply workflow is created.
+	PlanOnly bool
+	// SourceResourceGroup is the RG being exported from the source tenant.
+	// When non-empty, a scheduled export CI workflow is generated.
+	SourceResourceGroup string
+	// ExportSchedule is the cron expression for the scheduled export workflow.
+	// Defaults to "0 2 * * *" when empty.
+	ExportSchedule string
 	// WorkflowsDir overrides the embedded GitHub Actions workflow templates.
 	WorkflowsDir string
 	// RepoDir is the local path where the git repo is initialised.
@@ -158,7 +172,11 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	result.RepoDir = repoDir
 
-	log.Info("bootstrap: initialising git repository", "path", repoDir)
+	if opts.AdoptExisting {
+		log.Info("bootstrap: cloning existing repository", "path", repoDir)
+	} else {
+		log.Info("bootstrap: initialising git repository", "path", repoDir)
+	}
 
 	if err := initRepo(ctx, log, opts, repoDir, envs, location, isCrossTenant, stateCfg, targetSub, miRG); err != nil {
 		return result, err
@@ -166,16 +184,25 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 
 	// ── Stage 5: GITHUB REPO ──────────────────────────────────────────────────
 
-	log.Info("bootstrap: creating GitHub repository", "org", opts.RepoOrg, "repo", opts.RepoName)
-	if err := CreateAndPushRepo(ctx, RepoConfig{
-		Org:     opts.RepoOrg,
-		Name:    opts.RepoName,
-		RepoDir: repoDir,
-		Private: true,
-	}); err != nil {
-		return result, fmt.Errorf("creating GitHub repo: %w", err)
+	if opts.AdoptExisting {
+		// Push directly to the existing repo; no gh repo create needed.
+		log.Info("bootstrap: pushing to existing repository", "org", opts.RepoOrg, "repo", opts.RepoName)
+		if err := gitrepo.Push(ctx, repoDir, "origin", "main"); err != nil {
+			return result, fmt.Errorf("pushing to existing repo: %w", err)
+		}
+		log.Info("bootstrap: pushed to existing repository")
+	} else {
+		log.Info("bootstrap: creating GitHub repository", "org", opts.RepoOrg, "repo", opts.RepoName)
+		if err := CreateAndPushRepo(ctx, RepoConfig{
+			Org:     opts.RepoOrg,
+			Name:    opts.RepoName,
+			RepoDir: repoDir,
+			Private: true,
+		}); err != nil {
+			return result, fmt.Errorf("creating GitHub repo: %w", err)
+		}
+		log.Info("bootstrap: repository created and pushed")
 	}
-	log.Info("bootstrap: repository created and pushed")
 
 	// ── Stage 6: ACTIVATE (same-tenant only) ──────────────────────────────────
 
@@ -321,11 +348,22 @@ func initRepo(
 	stateCfg StateStorageConfig,
 	targetSub, miRG string,
 ) error {
-	if err := prepareDir(repoDir); err != nil {
-		return err
-	}
-	if err := gitrepo.Init(ctx, repoDir); err != nil {
-		return fmt.Errorf("git init: %w", err)
+	if opts.AdoptExisting {
+		// Clone the existing repo so we can layer IaC on top of it.
+		repoURL := fmt.Sprintf("https://github.com/%s/%s.git", opts.RepoOrg, opts.RepoName)
+		if err := os.RemoveAll(repoDir); err != nil {
+			return fmt.Errorf("clearing repo dir: %w", err)
+		}
+		if err := gitrepo.Clone(ctx, repoURL, repoDir); err != nil {
+			return fmt.Errorf("cloning repo: %w", err)
+		}
+	} else {
+		if err := prepareDir(repoDir); err != nil {
+			return err
+		}
+		if err := gitrepo.Init(ctx, repoDir); err != nil {
+			return fmt.Errorf("git init: %w", err)
+		}
 	}
 	if err := gitrepo.ConfigUser(ctx, repoDir, "azlift", "azlift@noreply"); err != nil {
 		return fmt.Errorf("git config user: %w", err)
@@ -342,9 +380,12 @@ func initRepo(
 	// GitHub Actions workflows.
 	log.Info("bootstrap: writing GitHub Actions workflows")
 	if err := workflows.Write(repoDir, workflows.Config{
-		Environments: envs,
-		Mode:         opts.Mode,
-		CustomDir:    opts.WorkflowsDir,
+		Environments:        envs,
+		Mode:                opts.Mode,
+		PlanOnly:            opts.PlanOnly,
+		SourceResourceGroup: opts.SourceResourceGroup,
+		ExportSchedule:      opts.ExportSchedule,
+		CustomDir:           opts.WorkflowsDir,
 	}); err != nil {
 		return fmt.Errorf("writing workflows: %w", err)
 	}

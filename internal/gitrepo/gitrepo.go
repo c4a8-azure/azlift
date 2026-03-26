@@ -50,6 +50,11 @@ func Push(ctx context.Context, dir, remote, branch string) error {
 	return run(ctx, dir, "push", "--set-upstream", remote, branch)
 }
 
+// Clone clones repoURL into dir.
+func Clone(ctx context.Context, repoURL, dir string) error {
+	return run(ctx, "", "clone", repoURL, dir)
+}
+
 // run shells out to git with args inside dir and returns a descriptive error
 // that includes any captured stderr/stdout on failure.
 func run(ctx context.Context, dir string, args ...string) error {
