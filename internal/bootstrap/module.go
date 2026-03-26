@@ -36,7 +36,7 @@ type ModuleConfig struct {
 // GitHub environment variables.
 func GenerateBootstrapModule(cfg ModuleConfig, repoDir string) error {
 	dir := filepath.Join(repoDir, "bootstrap")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating bootstrap dir: %w", err)
 	}
 

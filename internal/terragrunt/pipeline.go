@@ -50,7 +50,7 @@ func Run(files []*refine.ParsedFile, opts Options) error {
 	}
 
 	moduleDir := filepath.Join(opts.OutputDir, "module")
-	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+	if err := os.MkdirAll(moduleDir, 0o750); err != nil {
 		return fmt.Errorf("creating module dir: %w", err)
 	}
 
@@ -69,7 +69,7 @@ func Run(files []*refine.ParsedFile, opts Options) error {
 	primaryEnv := opts.Environments[0]
 	for _, env := range opts.Environments {
 		envDir := filepath.Join(opts.OutputDir, "envs", env)
-		if err := os.MkdirAll(envDir, 0o755); err != nil {
+		if err := os.MkdirAll(envDir, 0o750); err != nil {
 			return fmt.Errorf("creating env dir %s: %w", env, err)
 		}
 

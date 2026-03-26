@@ -22,7 +22,7 @@ func prepareDir(dir string) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
-	return os.MkdirAll(dir, 0o755)
+	return os.MkdirAll(dir, 0o750)
 }
 
 // copyDirContents copies all regular files from src into dst, preserving the
@@ -55,7 +55,7 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		return err
 	}
 	defer in.Close() //nolint:errcheck
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode) //nolint:gosec
 	if err != nil {
 		return err
 	}

@@ -81,7 +81,7 @@ func Render(cfg Config) (map[string][]byte, error) {
 // <repoDir>/.github/workflows/.
 func Write(repoDir string, cfg Config) error {
 	outDir := filepath.Join(repoDir, ".github", "workflows")
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return fmt.Errorf("creating workflows directory: %w", err)
 	}
 
