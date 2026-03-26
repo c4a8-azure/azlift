@@ -53,6 +53,9 @@ type Options struct {
 	// MIResourceGroup is the RG for Managed Identities.
 	// Defaults to the first entry in ResourceGroups, then falls back to the state RG.
 	MIResourceGroup string
+	// Mode is "modules" (default) or "terragrunt". Controls the state blob key
+	// and which file is updated when activating the remote backend.
+	Mode string
 	// WorkflowsDir overrides the embedded GitHub Actions workflow templates.
 	WorkflowsDir string
 	// RepoDir is the local path where the git repo is initialised.
@@ -225,23 +228,36 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return result, fmt.Errorf("configuring GitHub environments: %w", err)
 	}
 
-	// 6d. Write real backend.tf on a feature branch and open a PR.
+	// 6d. Write real backend config on a feature branch and open a PR.
 	// Pushing directly to main would immediately trigger the apply workflow
 	// (on: push: branches: [main]) before any human review. Creating a PR
 	// instead ensures a review gate before CI/CD activates.
-	log.Info("bootstrap: writing backend.tf with state storage details")
-	if err := WriteBackend(BackendConfig{
+	backendCfg := BackendConfig{
 		ResourceGroupName:  stateCfg.ResourceGroupName,
 		StorageAccountName: stateCfg.StorageAccountName,
 		ContainerName:      stateCfg.ContainerName,
-		Key:                opts.RepoName + ".tfstate",
-	}, repoDir); err != nil {
-		return result, fmt.Errorf("writing backend.tf: %w", err)
+		Key:                stateKey(opts.Mode, opts.RepoName, envs),
 	}
+
+	var backendFile string
+	if opts.Mode == "terragrunt" {
+		log.Info("bootstrap: patching root.hcl with state storage details")
+		if err := PatchRootHCL(repoDir, backendCfg); err != nil {
+			return result, fmt.Errorf("patching root.hcl: %w", err)
+		}
+		backendFile = "root.hcl"
+	} else {
+		log.Info("bootstrap: writing backend.tf with state storage details")
+		if err := WriteBackend(backendCfg, repoDir); err != nil {
+			return result, fmt.Errorf("writing backend.tf: %w", err)
+		}
+		backendFile = "backend.tf"
+	}
+
 	if err := gitrepo.CreateBranch(ctx, repoDir, backendBranch); err != nil {
 		return result, fmt.Errorf("creating backend branch: %w", err)
 	}
-	if err := gitrepo.Add(ctx, repoDir, "backend.tf"); err != nil {
+	if err := gitrepo.Add(ctx, repoDir, backendFile); err != nil {
 		return result, err
 	}
 	if err := gitrepo.Commit(ctx, repoDir, "chore: configure azurerm backend"); err != nil {
@@ -275,18 +291,19 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 			tfStatePath, stateCfg.StorageAccountName, stateCfg.ContainerName,
 		)
 	}
-	log.Info("bootstrap: uploading terraform.tfstate to remote state", "path", tfStatePath)
+	blobKey := stateKey(opts.Mode, opts.RepoName, envs)
+	log.Info("bootstrap: uploading terraform.tfstate to remote state", "path", tfStatePath, "blob", blobKey)
 	if err := UploadTfState(ctx, cred, TfStateUploadConfig{
 		SubscriptionID:     targetSub,
 		ResourceGroupName:  stateCfg.ResourceGroupName,
 		StorageAccountName: stateCfg.StorageAccountName,
 		ContainerName:      stateCfg.ContainerName,
-		BlobKey:            opts.RepoName + ".tfstate",
+		BlobKey:            blobKey,
 		LocalPath:          tfStatePath,
 	}); err != nil {
 		return result, fmt.Errorf("uploading tfstate: %w", err)
 	}
-	log.Info("bootstrap: tfstate uploaded", "blob", opts.RepoName+".tfstate")
+	log.Info("bootstrap: tfstate uploaded", "blob", blobKey)
 
 	log.Info("bootstrap: complete")
 	return result, nil
@@ -326,6 +343,7 @@ func initRepo(
 	log.Info("bootstrap: writing GitHub Actions workflows")
 	if err := workflows.Write(repoDir, workflows.Config{
 		Environments: envs,
+		Mode:         opts.Mode,
 		CustomDir:    opts.WorkflowsDir,
 	}); err != nil {
 		return fmt.Errorf("writing workflows: %w", err)
@@ -353,15 +371,17 @@ func initRepo(
 		return fmt.Errorf("writing .gitignore: %w", err)
 	}
 
-	// backend.tf: always write placeholders in the initial commit.
-	// Same-tenant: overwritten with real values after state storage is provisioned.
-	// Cross-tenant: placeholder stays; operator fills in after applying bootstrap/.
-	if err := WriteBackend(BackendConfig{
-		ContainerName: stateCfg.ContainerName,
-		Key:           opts.RepoName + ".tfstate",
-		Placeholder:   true,
-	}, repoDir); err != nil {
-		return fmt.Errorf("writing backend.tf: %w", err)
+	// In modules mode write a placeholder backend.tf in the initial commit.
+	// In terragrunt mode root.hcl (copied from InputDir) already carries
+	// FILL_IN_* placeholders — no separate backend.tf is needed.
+	if opts.Mode != "terragrunt" {
+		if err := WriteBackend(BackendConfig{
+			ContainerName: stateCfg.ContainerName,
+			Key:           stateKey(opts.Mode, opts.RepoName, envs),
+			Placeholder:   true,
+		}, repoDir); err != nil {
+			return fmt.Errorf("writing backend.tf: %w", err)
+		}
 	}
 
 	// Initial commit.
@@ -461,4 +481,22 @@ func createBackendPR(ctx context.Context, org, repo string) (string, error) {
 // tfstatePath returns the expected path of the aztfexport state file.
 func tfstatePath(inputDir string) string {
 	return filepath.Join(inputDir, "terraform.tfstate")
+}
+
+// stateKey returns the Azure blob key for the primary environment state file.
+//
+// Modules mode: "<repoName>.tfstate" (flat, single state per repo).
+// Terragrunt mode: "envs/<primaryEnv>/terraform.tfstate" — matches the key
+// derived by Terragrunt's path_relative_to_include() for the primary env stack.
+// Only the primary environment (envs[0]) imports the existing state; additional
+// environments start with an empty state.
+func stateKey(mode, repoName string, envs []string) string {
+	if mode == "terragrunt" {
+		primaryEnv := "prod"
+		if len(envs) > 0 {
+			primaryEnv = envs[0]
+		}
+		return "envs/" + primaryEnv + "/terraform.tfstate"
+	}
+	return repoName + ".tfstate"
 }

@@ -49,8 +49,8 @@ func ensureStorageAccount(ctx context.Context, cred azcore.TokenCredential, subs
 		Kind:     to.Ptr(armstorage.KindStorageV2),
 		SKU:      &armstorage.SKU{Name: to.Ptr(armstorage.SKUNameStandardLRS)},
 		Properties: &armstorage.AccountPropertiesCreateParameters{
-			MinimumTLSVersion:     to.Ptr(armstorage.MinimumTLSVersionTLS12),
-			AllowBlobPublicAccess: to.Ptr(false),
+			MinimumTLSVersion:      to.Ptr(armstorage.MinimumTLSVersionTLS12),
+			AllowBlobPublicAccess:  to.Ptr(false),
 			EnableHTTPSTrafficOnly: to.Ptr(true),
 		},
 	}, nil)

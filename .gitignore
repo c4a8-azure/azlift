@@ -6,3 +6,4 @@ refined/
 scan-result.json
 .azlift/
 .claude/
+.tmp/

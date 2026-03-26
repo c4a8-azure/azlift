@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -42,6 +44,7 @@ Example (cross-tenant):
 
 	cmd.Flags().String("input-dir", "./refined", "Directory containing refined Terraform output to commit")
 	cmd.Flags().String("state-dir", "", "Directory containing terraform.tfstate from aztfexport (defaults to --input-dir)")
+	cmd.Flags().String("mode", "", "Output mode: modules or terragrunt (auto-detected from input-dir when empty)")
 	cmd.Flags().String("repo-name", "", "Name of the Git repository to create (required)")
 	cmd.Flags().String("org", "", "GitHub organisation (required)")
 	cmd.Flags().StringSlice("environments", []string{"prod", "dev"}, "Deployment environments (comma-separated)")
@@ -62,6 +65,14 @@ Example (cross-tenant):
 func runBootstrap(cmd *cobra.Command, _ []string) error {
 	inputDir, _ := cmd.Flags().GetString("input-dir")
 	stateDir, _ := cmd.Flags().GetString("state-dir")
+	mode, _ := cmd.Flags().GetString("mode")
+	if mode == "" {
+		if _, err := os.Stat(filepath.Join(inputDir, "root.hcl")); err == nil {
+			mode = "terragrunt"
+		} else {
+			mode = "modules"
+		}
+	}
 	repoName, _ := cmd.Flags().GetString("repo-name")
 	org, _ := cmd.Flags().GetString("org")
 	envs, _ := cmd.Flags().GetStringSlice("environments")
@@ -79,7 +90,7 @@ func runBootstrap(cmd *cobra.Command, _ []string) error {
 	}
 
 	log := Log.WithStage("BOOTSTRAP")
-	log.Info(fmt.Sprintf("bootstrapping repo %s/%s", org, repoName))
+	log.Info(fmt.Sprintf("bootstrapping repo %s/%s (mode: %s)", org, repoName, mode))
 
 	result, err := bootstrap.Run(cmd.Context(), bootstrap.Options{
 		SubscriptionID:     sub,
@@ -88,6 +99,7 @@ func runBootstrap(cmd *cobra.Command, _ []string) error {
 		TenantID:           tenantID,
 		RepoName:           repoName,
 		RepoOrg:            org,
+		Mode:               mode,
 		Environments:       envs,
 		InputDir:           inputDir,
 		TfStateDir:         stateDir,

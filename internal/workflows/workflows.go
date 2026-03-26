@@ -19,6 +19,10 @@ var embedded embed.FS
 type Config struct {
 	// Environments is the list of deployment tiers (e.g. prod, staging, dev).
 	Environments []string
+	// Mode is "modules" (default) or "terragrunt". Selects the correct
+	// workflow templates — terragrunt templates run commands from envs/<env>/
+	// and check root.hcl instead of backend.tf.
+	Mode string
 	// CustomDir, when non-empty, reads .yml files from this directory instead
 	// of the embedded templates. Files must be named plan.yml.tmpl and
 	// apply.yml.tmpl and use the same {{.Environment}} template variable.
@@ -29,15 +33,20 @@ type Config struct {
 // files derived from cfg. Files are named plan-{env}.yml, apply-{env}.yml,
 // and drift-{env}.yml.
 func Render(cfg Config) (map[string][]byte, error) {
-	planTmpl, err := loadTemplate(cfg.CustomDir, "plan.yml.tmpl")
+	planName, applyName, driftName := "plan.yml.tmpl", "apply.yml.tmpl", "drift.yml.tmpl"
+	if cfg.Mode == "terragrunt" {
+		planName, applyName, driftName = "plan-tg.yml.tmpl", "apply-tg.yml.tmpl", "drift-tg.yml.tmpl"
+	}
+
+	planTmpl, err := loadTemplate(cfg.CustomDir, planName)
 	if err != nil {
 		return nil, fmt.Errorf("loading plan template: %w", err)
 	}
-	applyTmpl, err := loadTemplate(cfg.CustomDir, "apply.yml.tmpl")
+	applyTmpl, err := loadTemplate(cfg.CustomDir, applyName)
 	if err != nil {
 		return nil, fmt.Errorf("loading apply template: %w", err)
 	}
-	driftTmpl, err := loadTemplate(cfg.CustomDir, "drift.yml.tmpl")
+	driftTmpl, err := loadTemplate(cfg.CustomDir, driftName)
 	if err != nil {
 		return nil, fmt.Errorf("loading drift template: %w", err)
 	}
@@ -72,7 +81,7 @@ func Render(cfg Config) (map[string][]byte, error) {
 // <repoDir>/.github/workflows/.
 func Write(repoDir string, cfg Config) error {
 	outDir := filepath.Join(repoDir, ".github", "workflows")
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return fmt.Errorf("creating workflows directory: %w", err)
 	}
 

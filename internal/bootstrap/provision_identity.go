@@ -14,8 +14,8 @@ import (
 
 const (
 	// Well-known Azure built-in role definition IDs (identical in all tenants).
-	roleIDReader               = "acdd72a7-3385-48ef-bd42-f606fba81ae7"
-	roleIDContributor          = "b24988ac-6180-42a0-ab88-20f7382dd24c"
+	roleIDReader                 = "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+	roleIDContributor            = "b24988ac-6180-42a0-ab88-20f7382dd24c"
 	roleIDStorageBlobDataContrib = "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
 
 	oidcIssuer   = "https://token.actions.githubusercontent.com"

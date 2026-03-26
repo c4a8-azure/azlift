@@ -1,0 +1,233 @@
+name: "Drift Detection · {{ .Environment }}"
+
+on:
+  schedule:
+    - cron: '0 6 * * 1-5'   # 06:00 UTC, Monday–Friday
+  workflow_dispatch:
+    inputs:
+      notify_only:
+        description: 'Open issue but do not fail the job'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  drift:
+    name: detect drift
+    runs-on: ubuntu-latest
+    environment: {{ .Environment }}-iac-plan
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
+
+    env:
+      TF_ENV: {{ .Environment }}
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ "{{" }} vars.AZURE_CLIENT_ID {{ "}}" }}
+      ARM_TENANT_ID: ${{ "{{" }} vars.AZURE_TENANT_ID {{ "}}" }}
+      ARM_SUBSCRIPTION_ID: ${{ "{{" }} vars.AZURE_SUBSCRIPTION_ID {{ "}}" }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check backend is activated
+        run: |
+          if grep -qE 'FILL_IN' root.hcl 2>/dev/null; then
+            echo "::error title=Backend not activated::root.hcl still contains placeholder values."
+            echo "::error::Merge the 'chore/activate-backend' pull request to configure"
+            echo "::error::the remote backend before drift detection can run."
+            exit 1
+          fi
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ "{{" }} vars.AZURE_CLIENT_ID {{ "}}" }}
+          tenant-id: ${{ "{{" }} vars.AZURE_TENANT_ID {{ "}}" }}
+          subscription-id: ${{ "{{" }} vars.AZURE_SUBSCRIPTION_ID {{ "}}" }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Setup Terragrunt
+        run: |
+          TG_VER=$(curl -s https://api.github.com/repos/gruntwork-io/terragrunt/releases/latest \
+            | grep '"tag_name"' | cut -d'"' -f4)
+          curl -sL "https://github.com/gruntwork-io/terragrunt/releases/download/${TG_VER}/terragrunt_linux_amd64" \
+            -o /usr/local/bin/terragrunt
+          chmod +x /usr/local/bin/terragrunt
+
+      - name: Terragrunt init
+        working-directory: envs/{{ .Environment }}
+        run: terragrunt init -reconfigure
+
+      # -detailed-exitcode: 0 = no changes, 1 = error, 2 = drift detected
+      - name: Terragrunt plan
+        id: plan
+        working-directory: envs/{{ .Environment }}
+        run: |
+          set +e
+          terragrunt plan \
+            -detailed-exitcode \
+            -refresh=true \
+            -no-color 2>&1 | tee ../../plan.log
+          echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Parse drift report
+        id: report
+        if: steps.plan.outputs.exitcode == '2'
+        run: |
+          python3 - <<'PYEOF'
+          import os, re
+
+          with open('plan.log') as f:
+              log = f.read()
+
+          repo    = os.environ.get('GITHUB_REPOSITORY', '')
+          run_id  = os.environ.get('GITHUB_RUN_ID', '')
+          run_url = f"https://github.com/{repo}/actions/runs/{run_id}"
+          env     = os.environ['TF_ENV']
+          today   = __import__('datetime').date.today().isoformat()
+
+          # Extract resource change lines from plan text output.
+          changes = re.findall(r'^\s+#\s+(\S+)\s+will be\s+(.+)$', log, re.MULTILINE)
+
+          lines = [
+              f"## 🔍 Drift detected in `{env}` — {today}",
+              "",
+              f"> **{len(changes)} resource(s)** out of sync with Terraform state  "
+              f"· [View run]({run_url})",
+              "",
+          ]
+
+          if changes:
+              lines += [
+                  "| Resource address | Action |",
+                  "|------------------|--------|",
+              ]
+              for addr, action in sorted(changes):
+                  lines.append(f"| `{addr}` | {action} |")
+              lines.append("")
+
+          lines += [
+              "---",
+              "_To remediate: review the changes above and run `terragrunt apply` "
+              "or update your Terraform code to match the intended state._",
+          ]
+
+          body = "\n".join(lines)
+
+          with open('drift_report.md', 'w') as f:
+              f.write(body)
+
+          summary = os.environ.get('GITHUB_STEP_SUMMARY', '/dev/null')
+          with open(summary, 'a') as f:
+              f.write(body + "\n")
+
+          print(f"::notice title=Drift detected::{len(changes)} resource(s) out of sync in {env}")
+          PYEOF
+
+      - name: Ensure drift labels exist
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = [
+              { name: 'drift',           color: 'e11d48', description: 'Terraform state drift detected'  },
+              { name: '${{ .Environment }}', color: '7c3aed', description: 'Environment: ${{ .Environment }}' },
+              { name: 'drift:resolved',  color: '16a34a', description: 'Drift was resolved'              },
+            ]
+            for (const label of labels) {
+              try {
+                await github.rest.issues.createLabel({ ...context.repo, ...label })
+              } catch (e) {
+                if (e.status !== 422) throw e
+              }
+            }
+
+      - name: Open or update drift issue
+        if: steps.plan.outputs.exitcode == '2'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs')
+            const body    = fs.readFileSync('drift_report.md', 'utf8')
+            const title   = '🔍 Terraform drift detected: `${{ .Environment }}`'
+            const envLabel = '${{ .Environment }}'
+            const labels  = ['drift', envLabel]
+
+            const { data: open } = await github.rest.issues.listForRepo({
+              ...context.repo, state: 'open', labels: labels.join(','),
+            })
+            const existing = open.find(i => i.title === title)
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: existing.number,
+                body,
+              })
+              core.notice(`Drift issue #${existing.number} updated`)
+            } else {
+              const { data: issue } = await github.rest.issues.create({
+                ...context.repo, title, body, labels,
+              })
+              core.notice(`Drift issue #${issue.number} opened: ${issue.html_url}`)
+            }
+
+      - name: Close resolved drift issue
+        if: steps.plan.outputs.exitcode == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title   = '🔍 Terraform drift detected: `${{ .Environment }}`'
+            const envLabel = '${{ .Environment }}'
+            const labels  = ['drift', envLabel]
+
+            const { data: open } = await github.rest.issues.listForRepo({
+              ...context.repo, state: 'open', labels: labels.join(','),
+            })
+            const existing = open.find(i => i.title === title)
+
+            if (existing) {
+              const today = new Date().toISOString().slice(0, 10)
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: existing.number,
+                body: `### ✅ Drift resolved — ${today}\n\nNo changes detected. Infrastructure matches state.`,
+              })
+              await github.rest.issues.update({
+                ...context.repo,
+                issue_number: existing.number,
+                state: 'closed',
+                labels: [envLabel, 'drift:resolved'],
+              })
+              core.notice(`Drift issue #${existing.number} closed — environment is clean`)
+            }
+
+      - name: Write clean summary
+        if: steps.plan.outputs.exitcode == '0'
+        run: |
+          {
+            echo "## ✅ No drift: \`${{ .Environment }}\`"
+            echo ""
+            echo "Infrastructure matches Terraform state as of $(date -u '+%Y-%m-%d %H:%M UTC')"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail on drift
+        if: |
+          steps.plan.outputs.exitcode == '2' &&
+          github.event.inputs.notify_only != 'true'
+        run: |
+          echo "::error::Drift detected in ${{ .Environment }} — see the issue opened in this repository"
+          exit 1
+
+      - name: Fail on plan error
+        if: steps.plan.outputs.exitcode == '1'
+        run: |
+          echo "::error::terragrunt plan exited with an error — check the logs above"
+          exit 1

@@ -1,0 +1,62 @@
+name: "Plan · {{ .Environment }}"
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  plan:
+    name: terragrunt plan
+    runs-on: ubuntu-latest
+    environment: {{ .Environment }}-iac-plan
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check backend is activated
+        run: |
+          if grep -qE 'FILL_IN' root.hcl 2>/dev/null; then
+            echo "::error title=Backend not activated::root.hcl still contains placeholder values."
+            echo "::error::Merge the 'chore/activate-backend' pull request first."
+            exit 1
+          fi
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ "{{" }} vars.AZURE_CLIENT_ID {{ "}}" }}
+          tenant-id: ${{ "{{" }} vars.AZURE_TENANT_ID {{ "}}" }}
+          subscription-id: ${{ "{{" }} vars.AZURE_SUBSCRIPTION_ID {{ "}}" }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Setup Terragrunt
+        run: |
+          TG_VER=$(curl -s https://api.github.com/repos/gruntwork-io/terragrunt/releases/latest \
+            | grep '"tag_name"' | cut -d'"' -f4)
+          curl -sL "https://github.com/gruntwork-io/terragrunt/releases/download/${TG_VER}/terragrunt_linux_amd64" \
+            -o /usr/local/bin/terragrunt
+          chmod +x /usr/local/bin/terragrunt
+
+      - name: Terragrunt init
+        working-directory: envs/{{ .Environment }}
+        run: terragrunt init -reconfigure
+        env:
+          ARM_USE_OIDC: "true"
+          ARM_CLIENT_ID: ${{ "{{" }} vars.AZURE_CLIENT_ID {{ "}}" }}
+          ARM_TENANT_ID: ${{ "{{" }} vars.AZURE_TENANT_ID {{ "}}" }}
+          ARM_SUBSCRIPTION_ID: ${{ "{{" }} vars.AZURE_SUBSCRIPTION_ID {{ "}}" }}
+
+      - name: Terragrunt plan
+        working-directory: envs/{{ .Environment }}
+        run: terragrunt plan -no-color
+        env:
+          ARM_USE_OIDC: "true"
+          ARM_CLIENT_ID: ${{ "{{" }} vars.AZURE_CLIENT_ID {{ "}}" }}
+          ARM_TENANT_ID: ${{ "{{" }} vars.AZURE_TENANT_ID {{ "}}" }}
+          ARM_SUBSCRIPTION_ID: ${{ "{{" }} vars.AZURE_SUBSCRIPTION_ID {{ "}}" }}

@@ -29,28 +29,28 @@ var noTagsResourceTypes = map[string]bool{
 	"azurerm_virtual_network_peering":                                                true,
 
 	// ── Storage: data-plane and configuration resources ───────────────────────
-	"azurerm_storage_account_blob_properties":          true,
-	"azurerm_storage_account_network_rules":            true,
-	"azurerm_storage_account_queue_properties":         true,
-	"azurerm_storage_blob":                             true,
-	"azurerm_storage_container":                        true,
-	"azurerm_storage_management_policy":                true,
-	"azurerm_storage_object_replication":               true,
-	"azurerm_storage_queue":                            true,
-	"azurerm_storage_share":                            true,
-	"azurerm_storage_share_directory":                  true,
-	"azurerm_storage_table":                            true,
-	"azurerm_storage_table_entity":                     true,
+	"azurerm_storage_account_blob_properties":  true,
+	"azurerm_storage_account_network_rules":    true,
+	"azurerm_storage_account_queue_properties": true,
+	"azurerm_storage_blob":                     true,
+	"azurerm_storage_container":                true,
+	"azurerm_storage_management_policy":        true,
+	"azurerm_storage_object_replication":       true,
+	"azurerm_storage_queue":                    true,
+	"azurerm_storage_share":                    true,
+	"azurerm_storage_share_directory":          true,
+	"azurerm_storage_table":                    true,
+	"azurerm_storage_table_entity":             true,
 
 	// ── IAM / identity ────────────────────────────────────────────────────────
 	"azurerm_federated_identity_credential": true,
 	"azurerm_role_assignment":               true,
 
 	// ── DNS records (zone and link resources DO have tags) ────────────────────
-	"azurerm_private_dns_cname_record":  true,
-	"azurerm_private_dns_ptr_record":    true,
-	"azurerm_private_dns_srv_record":    true,
-	"azurerm_private_dns_txt_record":    true,
+	"azurerm_private_dns_cname_record": true,
+	"azurerm_private_dns_ptr_record":   true,
+	"azurerm_private_dns_srv_record":   true,
+	"azurerm_private_dns_txt_record":   true,
 
 	// ── App Service / Function: association and slot config resources ──────────
 	"azurerm_app_service_virtual_network_swift_connection": true,

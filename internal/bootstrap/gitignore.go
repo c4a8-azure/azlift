@@ -70,6 +70,6 @@ func WriteGitignore(repoDir string) error {
 	return os.WriteFile(
 		filepath.Join(repoDir, ".gitignore"),
 		[]byte(terraformGitignore),
-		0o644,
+		0o600,
 	)
 }

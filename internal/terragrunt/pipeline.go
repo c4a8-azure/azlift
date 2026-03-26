@@ -1,7 +1,23 @@
+// Package terragrunt generates a DRY Terragrunt project layout from the
+// refined Terraform module produced by the refine stage.
+//
+// Layout produced:
+//
+//	<outputDir>/
+//	  module/                    — the refined TF module (backend.tf / providers.tf excluded)
+//	    terraform.tf             — required_version + required_providers
+//	    variables.tf             — all input variables incl. resource_group_name, environment
+//	    locals.tf                — common_tags (environment key wired to var.environment)
+//	    resources.*.tf           — topic resource files
+//	  root.hcl                   — remote_state + generate "provider" + global inputs
+//	  envs/
+//	    <env>/
+//	      terragrunt.hcl         — include root.hcl, source = ../../module, env inputs
 package terragrunt
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/c4a8-azure/azlift/internal/refine"
@@ -11,102 +27,79 @@ import (
 type Options struct {
 	// OutputDir is the root directory for the Terragrunt layout.
 	OutputDir string
-	// ModulesDir is the relative path (from OutputDir) where module source
-	// files live, e.g. "modules". Workload terragrunt.hcl files reference
-	// "${get_repo_root()}/<ModulesDir>/<workload>".
-	ModulesDir string
-	// RootConfig configures the root terragrunt.hcl.
-	RootConfig RootConfig
-	// Environments is the list of deployment environments to generate.
-	// Defaults to prod/staging/dev when nil.
-	Environments []Environment
-	// ApplyDevSubst enables dev SKU substitution when generating the dev
-	// environment inputs from prod values.
-	ApplyDevSubst bool
+	// Environments is the list of deployment tiers (e.g. ["prod", "dev"]).
+	// Defaults to ["prod", "dev"] when nil.
+	Environments []string
+	// SourceResourceGroup is the RG name from the aztfexport run.
+	// Used to derive per-environment RG names (e.g. rg-myapp-prod → rg-myapp-dev).
+	SourceResourceGroup string
 }
 
-// DefaultOptions returns Options with sensible defaults.
+// DefaultOptions returns Options with sensible defaults for outputDir.
 func DefaultOptions(outputDir string) Options {
 	return Options{
-		OutputDir:     outputDir,
-		ModulesDir:    "modules",
-		RootConfig:    DefaultRootConfig(),
-		Environments:  DefaultEnvironments(),
-		ApplyDevSubst: true,
+		OutputDir:    outputDir,
+		Environments: []string{"prod", "dev"},
 	}
 }
 
-// Run generates the full Terragrunt layout from the refined module files:
-//
-//  1. Write root terragrunt.hcl.
-//  2. Derive workloads from grouped .tf file names.
-//  3. Write _envcommon/<workload>.hcl for each workload.
-//  4. Write <env>/env.hcl + <env>/<workload>/terragrunt.hcl for each env.
-func Run(groupedFiles []*refine.ParsedFile, opts Options) error {
-	// 1. Root config.
-	if err := GenerateRoot(opts.OutputDir, opts.RootConfig); err != nil {
-		return fmt.Errorf("generating root terragrunt.hcl: %w", err)
+// Run generates the full Terragrunt layout from the refined module files.
+func Run(files []*refine.ParsedFile, opts Options) error {
+	if len(opts.Environments) == 0 {
+		opts.Environments = []string{"prod", "dev"}
 	}
 
-	// 2. Derive workloads.
-	names := make([]string, len(groupedFiles))
-	for i, pf := range groupedFiles {
-		names[i] = filepath.Base(pf.Path)
-	}
-	modDir := opts.ModulesDir
-	if modDir == "" {
-		modDir = "modules"
-	}
-	workloads := DefaultWorkloads(names, modDir)
-
-	// 3. _envcommon.
-	if err := GenerateEnvcommon(opts.OutputDir, workloads); err != nil {
-		return fmt.Errorf("generating _envcommon: %w", err)
+	moduleDir := filepath.Join(opts.OutputDir, "module")
+	if err := os.MkdirAll(moduleDir, 0o750); err != nil {
+		return fmt.Errorf("creating module dir: %w", err)
 	}
 
-	envs := opts.Environments
-	if len(envs) == 0 {
-		envs = DefaultEnvironments()
+	// 1. Write module/ — extract RG locals → variables, patch common_tags.
+	modResult, err := writeModule(files, moduleDir)
+	if err != nil {
+		return fmt.Errorf("writing module: %w", err)
 	}
 
-	// Apply dev substitutions to workload inputs for the dev environment.
-	if opts.ApplyDevSubst {
-		workloads = applyDevToWorkloads(workloads, envs)
+	// 2. Write root.hcl.
+	if err := writeRoot(opts.OutputDir, modResult.Location); err != nil {
+		return fmt.Errorf("writing root.hcl: %w", err)
 	}
 
-	// 4. Per-environment directories.
-	if err := GenerateEnvironments(opts.OutputDir, envs, workloads); err != nil {
-		return fmt.Errorf("generating environments: %w", err)
+	// 3. Write envs/<env>/terragrunt.hcl for each environment.
+	primaryEnv := opts.Environments[0]
+	for _, env := range opts.Environments {
+		envDir := filepath.Join(opts.OutputDir, "envs", env)
+		if err := os.MkdirAll(envDir, 0o750); err != nil {
+			return fmt.Errorf("creating env dir %s: %w", env, err)
+		}
+
+		rgInputs := deriveEnvRGInputs(modResult.RGLocals, opts.SourceResourceGroup, primaryEnv, env)
+		if err := writeEnvStack(envDir, env, rgInputs); err != nil {
+			return fmt.Errorf("writing env stack %s: %w", env, err)
+		}
+	}
+
+	// 4. Remove the flat .tf files from outputDir root — they are now in
+	// module/ and having them in the root would confuse terraform/terragrunt.
+	if err := removeRootTFFiles(opts.OutputDir); err != nil {
+		return fmt.Errorf("cleaning root .tf files: %w", err)
 	}
 
 	return nil
 }
 
-// applyDevToWorkloads applies SKU substitution to workload inputs for any
-// environment named "dev" or starting with "dev". Other environments are
-// left unchanged (their overrides are picked up at plan time via env.hcl).
-func applyDevToWorkloads(workloads []WorkloadInputs, envs []Environment) []WorkloadInputs {
-	// Check whether a dev environment exists.
-	hasDev := false
-	for _, e := range envs {
-		if e.Name == "dev" {
-			hasDev = true
-			break
+// removeRootTFFiles deletes all *.tf files directly inside dir (non-recursive).
+// These are the original refine-stage outputs that have been superseded by the
+// files written into module/.
+func removeRootTFFiles(dir string) error {
+	entries, err := filepath.Glob(filepath.Join(dir, "*.tf"))
+	if err != nil {
+		return err
+	}
+	for _, path := range entries {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("removing %s: %w", filepath.Base(path), err)
 		}
 	}
-	if !hasDev {
-		return workloads
-	}
-
-	result := make([]WorkloadInputs, len(workloads))
-	for i, w := range workloads {
-		devInputs := ApplyDevSubstitutions(w.Inputs, nil)
-		devInputs = DowngradeInstanceCount(devInputs)
-		result[i] = WorkloadInputs{
-			Name:         w.Name,
-			ModuleSource: w.ModuleSource,
-			Inputs:       devInputs,
-		}
-	}
-	return result
+	return nil
 }
