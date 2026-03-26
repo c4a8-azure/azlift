@@ -343,6 +343,7 @@ func initRepo(
 	log.Info("bootstrap: writing GitHub Actions workflows")
 	if err := workflows.Write(repoDir, workflows.Config{
 		Environments: envs,
+		Mode:         opts.Mode,
 		CustomDir:    opts.WorkflowsDir,
 	}); err != nil {
 		return fmt.Errorf("writing workflows: %w", err)
