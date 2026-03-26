@@ -43,11 +43,22 @@ func ExtractVariables(files []*ParsedFile, outputDir string) (varsFile, localsFi
 
 	for _, pf := range files {
 		for _, block := range Blocks(pf, "resource") {
+			resourceType := ""
+			if len(block.Labels()) > 0 {
+				resourceType = block.Labels()[0]
+			}
 			for name, attr := range block.Body().Attributes() {
+				// azurerm_resource_group stores the RG name in "name", not
+				// "resource_group_name". Normalize so its value is counted
+				// together with resource_group_name across other resources.
+				countAs := name
+				if name == "name" && resourceType == "azurerm_resource_group" {
+					countAs = "resource_group_name"
+				}
 				val := strings.TrimSpace(string(attr.Expr().BuildTokens(nil).Bytes()))
 				// Only count plain string literals (quoted, no interpolation).
 				if isStringLiteral(val) {
-					counts[attrVal{name, val}]++
+					counts[attrVal{countAs, val}]++
 				}
 			}
 		}
@@ -156,11 +167,25 @@ func appendVariableBlock(body *hclwrite.Body, name, defaultVal string) {
 // Only attributes whose value exactly matches the extracted value are rewritten;
 // other occurrences of the same attribute name with different values are left
 // untouched, preventing cross-resource contamination.
+//
+// Special case: for azurerm_resource_group resources, resource_group_name refs
+// are written to the "name" attribute (which holds the RG name in that type).
 func rewriteRefs(files []*ParsedFile, refMap map[attrVal]string) {
 	for _, pf := range files {
 		for _, block := range Blocks(pf, "resource") {
+			resourceType := ""
+			if len(block.Labels()) > 0 {
+				resourceType = block.Labels()[0]
+			}
 			for key, ref := range refMap {
-				attr := block.Body().GetAttribute(key.attr)
+				// azurerm_resource_group.name holds the same value that other
+				// resources put in resource_group_name — rewrite name, not
+				// resource_group_name (which doesn't exist on this resource type).
+				lookupAttr := key.attr
+				if key.attr == "resource_group_name" && resourceType == "azurerm_resource_group" {
+					lookupAttr = "name"
+				}
+				attr := block.Body().GetAttribute(lookupAttr)
 				if attr == nil {
 					continue
 				}
@@ -168,7 +193,7 @@ func rewriteRefs(files []*ParsedFile, refMap map[attrVal]string) {
 				if val != key.val {
 					continue // value doesn't match — leave untouched
 				}
-				block.Body().SetAttributeRaw(key.attr, hclwrite.TokensForIdentifier(ref))
+				block.Body().SetAttributeRaw(lookupAttr, hclwrite.TokensForIdentifier(ref))
 			}
 		}
 	}

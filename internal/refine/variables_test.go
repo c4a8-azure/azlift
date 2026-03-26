@@ -203,7 +203,7 @@ func TestExtractVariables_RewriteOnlyMatchingValue(t *testing.T) {
 	// Both are alwaysVariable, so numbered variables are generated.
 	// "rg-a" must be rewritten to its own ref, not to rg-main's ref.
 	hcl := `
-resource "azurerm_resource_group" "a"  { resource_group_name = "rg-a" }
+resource "azurerm_storage_account" "a" { resource_group_name = "rg-a" }
 resource "azurerm_vnet" "v1"           { resource_group_name = "rg-main" }
 resource "azurerm_vnet" "v2"           { resource_group_name = "rg-main" }
 resource "azurerm_subnet" "s1"         { resource_group_name = "rg-main" }
@@ -237,6 +237,50 @@ resource "azurerm_subnet" "s1"         { resource_group_name = "rg-main" }
 	// Resources should reference numbered var.* refs.
 	if !strings.Contains(src, "var.resource_group_name") {
 		t.Errorf("resource blocks should use var.resource_group_name refs:\n%s", src)
+	}
+}
+
+func TestExtractVariables_AzurermResourceGroupNameBecomesVar(t *testing.T) {
+	// azurerm_resource_group uses "name" to hold the RG name.
+	// It must be normalized to resource_group_name and rewritten to var.*.
+	hcl := `
+resource "azurerm_resource_group" "res-0" {
+  location = "westeurope"
+  name     = "rg-customer-gwc"
+}
+resource "azurerm_virtual_network" "vnet" {
+  location            = "westeurope"
+  resource_group_name = "rg-customer-gwc"
+}
+resource "azurerm_subnet" "snet" {
+  resource_group_name = "rg-customer-gwc"
+}
+`
+	tmp := t.TempDir()
+	writeTFFile(t, tmp, "main.tf", hcl)
+	files, _ := ParseDir(tmp)
+
+	varsFile, _, err := ExtractVariables(files, tmp)
+	if err != nil {
+		t.Fatalf("ExtractVariables: %v", err)
+	}
+
+	// variable "resource_group_name" must appear in variables.tf.
+	vars := string(varsFile.File.Bytes())
+	if !strings.Contains(vars, `variable "resource_group_name"`) {
+		t.Errorf("expected variable \"resource_group_name\" in variables.tf:\n%s", vars)
+	}
+	if !strings.Contains(vars, "rg-customer-gwc") {
+		t.Errorf("expected default rg-customer-gwc in variables.tf:\n%s", vars)
+	}
+
+	// azurerm_resource_group.name must be rewritten to var.resource_group_name.
+	src := string(files[0].File.Bytes())
+	if strings.Contains(src, `"rg-customer-gwc"`) {
+		t.Errorf("literal rg-customer-gwc should have been replaced:\n%s", src)
+	}
+	if !strings.Contains(src, "var.resource_group_name") {
+		t.Errorf("azurerm_resource_group.name should reference var.resource_group_name:\n%s", src)
 	}
 }
 
