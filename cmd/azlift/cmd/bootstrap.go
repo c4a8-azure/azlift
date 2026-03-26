@@ -90,7 +90,7 @@ func runBootstrap(cmd *cobra.Command, _ []string) error {
 	}
 
 	log := Log.WithStage("BOOTSTRAP")
-	log.Info(fmt.Sprintf("bootstrapping repo %s/%s", org, repoName))
+	log.Info(fmt.Sprintf("bootstrapping repo %s/%s (mode: %s)", org, repoName, mode))
 
 	result, err := bootstrap.Run(cmd.Context(), bootstrap.Options{
 		SubscriptionID:     sub,
