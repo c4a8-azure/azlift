@@ -179,13 +179,13 @@ func copyFileIfExists(src, dst string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer in.Close()
+	defer in.Close() //nolint:errcheck
 
 	out, err := os.Create(dst) //nolint:gosec
 	if err != nil {
 		return false, err
 	}
-	defer out.Close()
+	defer out.Close() //nolint:errcheck
 
 	if _, err := io.Copy(out, in); err != nil {
 		return false, err
